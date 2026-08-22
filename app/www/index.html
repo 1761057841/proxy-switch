@@ -61,6 +61,41 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .switch input:checked + .slider::before { transform: translateX(64px); background: #fff; }
 .hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; }
 .hint code { color: #7dd3fc; font-family: ui-monospace, Consolas, monospace; }
+.config {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(148, 163, 184, .18);
+  text-align: left;
+}
+.config h2 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
+.field { margin-bottom: 12px; }
+.field label {
+  display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px;
+}
+.field input {
+  width: 100%; padding: 9px 12px;
+  background: rgba(15, 23, 42, .6);
+  border: 1px solid rgba(148, 163, 184, .3);
+  border-radius: 8px;
+  color: #e2e8f0; font-size: 14px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  outline: none;
+}
+.field input:focus { border-color: #38bdf8; }
+.field .tip { font-size: 11px; color: #64748b; margin-top: 4px; }
+.save-btn {
+  width: 100%; padding: 10px;
+  margin-top: 6px;
+  background: linear-gradient(135deg, #0ea5e9, #2563eb);
+  border: none; border-radius: 8px;
+  color: #fff; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: opacity .2s;
+}
+.save-btn:hover { opacity: .85; }
+.save-btn:disabled { opacity: .5; cursor: not-allowed; }
+.save-msg { text-align: center; font-size: 12px; margin-top: 10px; min-height: 16px; }
+.save-msg.ok { color: #4ade80; }
+.save-msg.err { color: #f87171; }
 </style>
 </head>
 <body>
@@ -81,6 +116,20 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     <code id="addrHint">—</code><br>
     支持普通 HTTP 转发与 HTTPS 隧道（CONNECT）
   </p>
+  <div class="config">
+    <h2>⚙️ 代理配置</h2>
+    <div class="field">
+      <label for="cfgPort">监听端口</label>
+      <input type="number" id="cfgPort" min="1" max="65535" placeholder="8888">
+    </div>
+    <div class="field">
+      <label for="cfgUpstream">上游代理（可选）</label>
+      <input type="text" id="cfgUpstream" placeholder="如 192.168.1.100:7890，留空则直连">
+      <div class="tip">所有请求转发到该上游代理（HTTP 代理格式 host:port）</div>
+    </div>
+    <button class="save-btn" id="saveBtn">保存并生效</button>
+    <div class="save-msg" id="saveMsg"></div>
+  </div>
 </div>
 <script>
 const API = '/app/proxy-switch';
@@ -91,6 +140,8 @@ async function refresh() {
     const res = await fetch(API + '/api/status');
     const data = await res.json();
     render(data.enabled, data.port);
+    document.getElementById('cfgPort').value = data.port;
+    document.getElementById('cfgUpstream').value = data.upstream || '';
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
@@ -115,6 +166,39 @@ function render(enabled, port) {
   }
   document.getElementById('toggle').checked = enabled;
 }
+
+async function saveConfig() {
+  const btn = document.getElementById('saveBtn');
+  const msg = document.getElementById('saveMsg');
+  btn.disabled = true;
+  msg.className = 'save-msg';
+  msg.textContent = '保存中…';
+  try {
+    const res = await fetch(API + '/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        port: parseInt(document.getElementById('cfgPort').value, 10),
+        upstream: document.getElementById('cfgUpstream').value.trim()
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      msg.className = 'save-msg ok';
+      msg.textContent = '✅ 已保存' + (data.port ? '，当前端口 ' + data.port : '');
+      await refresh();
+    } else {
+      msg.className = 'save-msg err';
+      msg.textContent = '❌ ' + (data.error || '保存失败');
+    }
+  } catch (err) {
+    msg.className = 'save-msg err';
+    msg.textContent = '❌ 无法连接服务';
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('saveBtn').addEventListener('click', saveConfig);
 
 document.getElementById('toggle').addEventListener('change', async (e) => {
   if (busy) { e.target.checked = !e.target.checked; return; }

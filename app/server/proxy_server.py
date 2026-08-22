@@ -41,6 +41,11 @@ def load_state():
             _state = json.load(f)
     except Exception:
         _state = {"enabled": True}  # 首次运行默认开启代理
+    # 兼容旧状态文件：没有 port/upstream 字段时用默认值
+    if "port" not in _state:
+        _state["port"] = PROXY_PORT
+    if "upstream" not in _state:
+        _state["upstream"] = ""
 
 
 def save_state():
@@ -50,6 +55,20 @@ def save_state():
     except Exception:
         pass
 
+
+def current_port():
+    """当前生效的代理监听端口（来自配置，默认 PROXY_PORT）。"""
+    try:
+        return int(_state.get("port") or PROXY_PORT)
+    except Exception:
+        return PROXY_PORT
+
+
+def current_upstream():
+    """当前配置的上游代理，格式 host:port；未配置返回 None。"""
+    u = (_state.get("upstream") or "").strip()
+    return u if u else None
+
 # ---------------------------------------------------------------- 代理服务
 
 def start_proxy():
@@ -58,9 +77,10 @@ def start_proxy():
     with _lock:
         if _proxy_sock is not None:
             return
+        port = current_port()
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("0.0.0.0", PROXY_PORT))
+        s.bind(("0.0.0.0", port))
         s.listen(128)
         _proxy_sock = s
         t = threading.Thread(target=proxy_accept_loop, args=(s,), daemon=True)
@@ -118,10 +138,11 @@ def handle_proxy_client(conn):
             return
         method, target, version = parts[0], parts[1], parts[2]
 
+        upstream = current_upstream()
         if method == b"CONNECT":
-            handle_connect(conn, target)
+            handle_connect(conn, target, upstream)
         else:
-            handle_http(conn, method, target, version, rest, data)
+            handle_http(conn, method, target, version, rest, data, upstream)
     except Exception:
         pass
     finally:
@@ -131,12 +152,30 @@ def handle_proxy_client(conn):
             pass
 
 
-def handle_connect(conn, target):
-    """HTTPS 隧道：与目标建立 TCP 连接后双向转发。"""
+def handle_connect(conn, target, upstream=None):
+    """HTTPS 隧道：与目标建立 TCP 连接后双向转发。
+
+    配置了上游代理时，改为连接上游并发送 CONNECT 请求，由上游建立隧道。
+    """
     host, _, port = target.partition(b":")
     try:
         port = int(port or 443)
-        remote = socket.create_connection((host.decode("utf-8", "replace"), port), timeout=30)
+        if upstream:
+            up_host, up_port = parse_upstream(upstream)
+            remote = socket.create_connection((up_host, up_port), timeout=30)
+            remote.sendall(b"CONNECT " + target + b" HTTP/1.1\r\nHost: " + target + b"\r\n\r\n")
+            resp = b""
+            while b"\r\n\r\n" not in resp:
+                chunk = remote.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+            if not resp.startswith(b"HTTP/1.1 200") and not resp.startswith(b"HTTP/1.0 200"):
+                remote.close()
+                conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
+                return
+        else:
+            remote = socket.create_connection((host.decode("utf-8", "replace"), port), timeout=30)
     except Exception:
         try:
             conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
@@ -154,7 +193,15 @@ def handle_connect(conn, target):
     remote.close()
 
 
-def handle_http(conn, method, target, version, header_block, full_data):
+def parse_upstream(upstream):
+    """解析上游代理地址 'host:port'，非法则抛异常。"""
+    host, _, port = upstream.rpartition(":")
+    if not host or not port:
+        raise ValueError("bad upstream")
+    return host.strip(), int(port)
+
+
+def handle_http(conn, method, target, version, header_block, full_data, upstream=None):
     """普通 HTTP 代理：解析目标，重组请求并转发。"""
     target_str = target.decode("utf-8", "replace")
     host = None
@@ -186,15 +233,28 @@ def handle_http(conn, method, target, version, header_block, full_data):
                 port = 80
 
     try:
-        remote = socket.create_connection((host, port), timeout=30)
+        if upstream:
+            # 走上游代理：连接上游，并把目标地址还原成绝对 URL 形式
+            up_host, up_port = parse_upstream(upstream)
+            remote = socket.create_connection((up_host, up_port), timeout=30)
+            if not path.startswith("http://"):
+                scheme = b"https" if (method == b"CONNECT" or port == 443) else b"http"
+                target_url = scheme + b"://" + host.encode("utf-8", "replace")
+                if port not in (80, 443):
+                    target_url += b":" + str(port).encode()
+                target_url += path.encode("utf-8", "replace")
+            else:
+                target_url = path.encode("utf-8", "replace")
+            new_request_line = b"%s %s %s" % (method, target_url, version)
+        else:
+            remote = socket.create_connection((host, port), timeout=30)
+            new_request_line = b"%s %s %s" % (method, path.encode("utf-8", "replace"), version)
     except Exception:
         try:
             conn.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
         except Exception:
             pass
         return
-
-    new_request_line = b"%s %s %s" % (method, path.encode("utf-8", "replace"), version)
     headers_out = []
     for line in header_block.split(b"\r\n"):
         low = line.lower()
@@ -255,8 +315,11 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/api/status":
             self.send_json({
                 "enabled": bool(_state.get("enabled")),
-                "port": PROXY_PORT,
+                "port": current_port(),
+                "upstream": current_upstream() or "",
             })
+        elif path == "/api/config":
+            self.send_json({"port": current_port(), "upstream": current_upstream() or ""})
         elif path in ("/", "/index.html"):
             self.serve_file("index.html", "text/html; charset=utf-8")
         else:
@@ -266,10 +329,32 @@ class AdminHandler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/api/proxy/on":
             start_proxy()
-            self.send_json({"enabled": True, "port": PROXY_PORT})
+            self.send_json({"enabled": True, "port": current_port(), "upstream": current_upstream() or ""})
         elif path == "/api/proxy/off":
             stop_proxy()
-            self.send_json({"enabled": False, "port": PROXY_PORT})
+            self.send_json({"enabled": False, "port": current_port(), "upstream": current_upstream() or ""})
+        elif path == "/api/config":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length) if length else b"{}"
+                cfg = json.loads(body.decode("utf-8"))
+                new_port = int(cfg.get("port") or PROXY_PORT)
+                if not (1 <= new_port <= 65535):
+                    raise ValueError("port out of range")
+                upstream = (cfg.get("upstream") or "").strip()
+                if upstream:
+                    parse_upstream(upstream)  # 校验格式
+                was_enabled = bool(_state.get("enabled"))
+                _state["port"] = new_port
+                _state["upstream"] = upstream
+                save_state()
+                # 若代理正在运行，用新配置重启代理服务
+                if was_enabled:
+                    stop_proxy()
+                    start_proxy()
+                self.send_json({"ok": True, "port": current_port(), "upstream": current_upstream() or ""})
+            except Exception:
+                self.send_json({"ok": False, "error": "配置无效：端口需为 1-65535，上游格式为 host:port"})
         else:
             self.send_error(404)
 

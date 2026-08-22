@@ -7,7 +7,9 @@
 - ⚡ **纯标准库实现**：HTTP 代理服务基于 Python 标准库 `http.server` + `socketserver`，无第三方依赖
 - 🔌 **HTTP + HTTPS CONNECT 隧道**：普通 HTTP 请求直转，HTTPS 走 CONNECT 隧道
 - 🎚️ **随时开关**：通过管理页面一键开启 / 关闭代理，无需重启应用
-- 💾 **状态持久化**：开关状态保存到 `TRIM_PKGVAR/state.json`，应用重启后自动恢复
+- ⚙️ **可配置监听端口**：管理页面可输入代理监听端口（默认 8888），保存后自动生效
+- 🔀 **可选上游代理**：可配置上游代理地址（host:port），所有请求转发到上游，留空则直连
+- 💾 **状态持久化**：开关状态与配置保存到 `TRIM_PKGVAR/state.json`，应用重启后自动恢复
 - 🖥️ **fnOS 统一网关**：管理页面通过 Unix Socket + `/app/proxy-switch` 网关前缀访问，不占用额外 TCP 端口
 - 🐍 **依赖 python312**：fnOS 应用中心安装 `python312` 后即可使用
 
@@ -34,7 +36,11 @@ appcenter-cli install-fpk proxy-switch.fpk
 
 1. 打开应用「代理开关」，页面显示当前代理状态
 2. 点击开关即可开启 / 关闭代理
-3. 代理监听端口：`8888`（`service_port`，可在 manifest 中修改）
+3. 默认代理监听端口：`8888`（`service_port`，可在 manifest 中修改）
+4. 页面下方「⚙️ 代理配置」可修改：
+   - **监听端口**：自定义代理端口，保存后自动重启代理生效
+   - **上游代理（可选）**：填写 `host:port` 后所有请求转发到该上游代理（如 Clash 等）；留空则直连目标
+   - 配置保存在 `TRIM_PKGVAR/state.json`，重启应用后保留
 
 ## 目录结构
 
@@ -71,9 +77,19 @@ proxy-switch/
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SOCKET_PATH` | 统一网关 Unix Socket 路径 | `/tmp/proxy-switch.sock` |
-| `PROXY_PORT` | 代理监听端口 | `8888` |
-| `STATE_FILE` | 状态文件路径 | `/tmp/proxy-switch-state.json` |
+| `PROXY_PORT` | 代理监听端口（默认值，可被管理页配置覆盖） | `8888` |
+| `STATE_FILE` | 状态/配置文件路径 | `/tmp/proxy-switch-state.json` |
 | `WWW_DIR` | 前端静态页面目录 | 同目录 `www/` |
+
+## 管理 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/status` | 查询开关状态、当前端口、上游代理 |
+| GET | `/api/config` | 查询当前配置 |
+| POST | `/api/proxy/on` | 开启代理 |
+| POST | `/api/proxy/off` | 关闭代理 |
+| POST | `/api/config` | 保存配置 `{"port": 8888, "upstream": "host:port"}` |
 
 ## License
 
