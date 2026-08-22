@@ -1,0 +1,17 @@
+# 打包产物
+*.fpk
+*.tgz
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 运行时数据
+*.log
+*.pid
+app.sock
+state.json
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db

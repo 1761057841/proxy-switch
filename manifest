@@ -1,0 +1,15 @@
+appname=proxy-switch
+version=1.0.0
+display_name=代理开关
+desc=一个简单的 HTTP 代理服务。可在管理页面随时开启或关闭代理，支持普通 HTTP 请求与 HTTPS 隧道（CONNECT）。
+source=thirdparty
+platform=all
+maintainer=fnOS-Dev
+maintainer_url=https://example.com
+os_min_version=1.1.3100
+install_dep_apps=python312
+desktop_uidir=ui
+desktop_applaunchname=proxy-switch.main
+ctl_stop=true
+service_port=8888
+checkport=false

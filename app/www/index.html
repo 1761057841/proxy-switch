@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>代理开关</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  color: #e2e8f0;
+}
+.card {
+  width: 440px; max-width: 92vw;
+  background: rgba(30, 41, 59, .75);
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 20px;
+  padding: 40px 36px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+  text-align: center;
+}
+h1 { font-size: 22px; margin-bottom: 6px; }
+.sub { color: #94a3b8; font-size: 13px; margin-bottom: 28px; }
+.status-row {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-bottom: 18px; font-size: 16px; font-weight: 500;
+}
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.dot.on { background: #22c55e; box-shadow: 0 0 12px #22c55e; }
+.dot.off { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
+.addr {
+  background: rgba(15, 23, 42, .6);
+  border: 1px dashed rgba(148, 163, 184, .35);
+  border-radius: 10px;
+  padding: 12px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 14px;
+  color: #7dd3fc;
+  margin-bottom: 30px;
+  word-break: break-all;
+  user-select: all;
+}
+.addr.empty { color: #64748b; }
+.switch {
+  position: relative; display: inline-block; width: 120px; height: 56px; cursor: pointer;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0; border-radius: 28px;
+  background: #334155; transition: .3s;
+}
+.slider::before {
+  content: ""; position: absolute; width: 44px; height: 44px; border-radius: 50%;
+  left: 6px; top: 6px; background: #94a3b8; transition: .3s;
+}
+.switch input:checked + .slider { background: #059669; }
+.switch input:checked + .slider::before { transform: translateX(64px); background: #fff; }
+.hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; }
+.hint code { color: #7dd3fc; font-family: ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔄 代理开关</h1>
+  <p class="sub">HTTP 代理服务 · 随时开启 / 关闭</p>
+  <div class="status-row">
+    <span class="dot" id="dot"></span>
+    <span id="statusText">加载中…</span>
+  </div>
+  <div class="addr empty" id="addr">—</div>
+  <label class="switch">
+    <input type="checkbox" id="toggle">
+    <span class="slider"></span>
+  </label>
+  <p class="hint">
+    开启后，局域网设备可将 HTTP/HTTPS 代理设置为<br>
+    <code id="addrHint">—</code><br>
+    支持普通 HTTP 转发与 HTTPS 隧道（CONNECT）
+  </p>
+</div>
+<script>
+const API = '/app/proxy-switch';
+let busy = false;
+
+async function refresh() {
+  try {
+    const res = await fetch(API + '/api/status');
+    const data = await res.json();
+    render(data.enabled, data.port);
+  } catch (e) {
+    document.getElementById('statusText').textContent = '无法连接服务';
+  }
+}
+
+function render(enabled, port) {
+  const dot = document.getElementById('dot');
+  const text = document.getElementById('statusText');
+  const addr = document.getElementById('addr');
+  const addrHint = document.getElementById('addrHint');
+  dot.className = 'dot ' + (enabled ? 'on' : 'off');
+  text.textContent = enabled ? '代理运行中' : '代理已停止';
+  const url = 'http://' + location.hostname + ':' + (port || 8888);
+  if (enabled) {
+    addr.textContent = url;
+    addr.classList.remove('empty');
+    addrHint.textContent = url;
+  } else {
+    addr.textContent = '—';
+    addr.classList.add('empty');
+    addrHint.textContent = '—';
+  }
+  document.getElementById('toggle').checked = enabled;
+}
+
+document.getElementById('toggle').addEventListener('change', async (e) => {
+  if (busy) { e.target.checked = !e.target.checked; return; }
+  busy = true;
+  const on = e.target.checked;
+  try {
+    const res = await fetch(API + (on ? '/api/proxy/on' : '/api/proxy/off'), { method: 'POST' });
+    const data = await res.json();
+    render(data.enabled, data.port);
+  } catch (err) {
+    e.target.checked = !on;
+  }
+  busy = false;
+});
+
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "proxy-switch.main": {
+            "title": "代理开关",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/proxy-switch",
+            "gatewaySocket": "app.sock",
+            "url": "/app/proxy-switch",
+            "allUsers": true
+        }
+    }
+}
