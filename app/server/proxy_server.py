@@ -26,6 +26,9 @@ SOCKET_PATH = os.environ.get("SOCKET_PATH", "/tmp/proxy-switch.sock")
 PROXY_PORT = int(os.environ.get("PROXY_PORT", "8888"))
 STATE_FILE = os.environ.get("STATE_FILE", "/tmp/proxy-switch-state.json")
 WWW_DIR = os.environ.get("WWW_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "www"))
+# fnOS 统一网关前缀：网关转发时保留完整路径（/app/proxy-switch/...），
+# 应用需自行剥离后再匹配路由
+GATEWAY_PREFIX = os.environ.get("GATEWAY_PREFIX", "/app/proxy-switch")
 
 _lock = threading.Lock()
 _state = {"enabled": False}
@@ -310,8 +313,17 @@ def pipe(a, b):
 class AdminHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self):
+    def route_path(self):
+        """剥离网关前缀，返回应用内部路径。"""
         path = self.path.split("?", 1)[0]
+        if path.startswith(GATEWAY_PREFIX):
+            path = path[len(GATEWAY_PREFIX):]
+            if not path:
+                path = "/"
+        return path
+
+    def do_GET(self):
+        path = self.route_path()
         if path == "/api/status":
             self.send_json({
                 "enabled": bool(_state.get("enabled")),
@@ -326,7 +338,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        path = self.path.split("?", 1)[0]
+        path = self.route_path()
         if path == "/api/proxy/on":
             start_proxy()
             self.send_json({"enabled": True, "port": current_port(), "upstream": current_upstream() or ""})
