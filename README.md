@@ -1,16 +1,16 @@
-# proxy-switch（代理开关）
+# proxy-switch（NAS 全局代理开关）
 
-一个简单、轻量的 HTTP 代理服务 fnOS 应用。可在管理页面随时开启或关闭代理，支持普通 HTTP 请求与 HTTPS 隧道（CONNECT）。
+填写代理服务器地址（IP:端口），开启后**整个 NAS 上网走代理**，关闭恢复直连。支持可选认证，内网地址自动直连。
 
 ## 功能特性
 
-- ⚡ **纯标准库实现**：HTTP 代理服务基于 Python 标准库 `http.server` + `socketserver`，无第三方依赖
-- 🔌 **HTTP + HTTPS CONNECT 隧道**：普通 HTTP 请求直转，HTTPS 走 CONNECT 隧道
-- 🎚️ **随时开关**：通过管理页面一键开启 / 关闭代理，无需重启应用
-- ⚙️ **可配置监听端口**：管理页面可输入代理监听端口（默认 8888），保存后自动生效
-- 🔀 **可选上游代理**：可配置上游代理地址（host:port），所有请求转发到上游，留空则直连
-- 💾 **状态持久化**：开关状态与配置保存到 `TRIM_PKGVAR/state.json`，应用重启后自动恢复
-- 🖥️ **fnOS 统一网关**：管理页面通过 Unix Socket + `/app/proxy-switch` 网关前缀访问，不占用额外 TCP 端口
+- 🌐 **NAS 全局代理**：填写代理服务器地址（如 `192.168.1.100:7890`），开启后 NAS 新启动的程序全部走代理
+- 🔌 **支持认证**：代理服务器需要用户名/密码时可填写
+- 🚫 **内网直连**：自动排除局域网地址（192.168.x / 10.x / 172.16-31.x / localhost），不影响 NAS 局域网功能
+- 🎚️ **随时开关**：管理页面一键开启 / 关闭，无需重启应用
+- 💾 **配置持久化**：保存到 `TRIM_PKGVAR/state.json`，应用重启后自动恢复
+- 🔒 **系统级生效**：写入 `/etc/environment` + `/etc/profile.d/proxy-switch.sh` + systemd 全局环境（以 root 运行）
+- 🖥️ **fnOS 统一网关**：管理页面通过 Unix Socket + `/app/proxy-switch` 网关前缀访问
 - 🐍 **依赖 python312**：fnOS 应用中心安装 `python312` 后即可使用
 
 ## 快速开始
@@ -29,18 +29,17 @@ fnpack build
 通过 fnOS 应用中心手动安装，或使用 appcenter-cli：
 
 ```bash
-appcenter-cli install-fpk proxy-switch.fpk
+appcenter-cli install-fpk proxy-switch.fpk --volume-id <id> --yes
 ```
 
 ### 3. 使用
 
-1. 打开应用「代理开关」，页面显示当前代理状态
-2. 点击开关即可开启 / 关闭代理
-3. 默认代理监听端口：`8888`（`service_port`，可在 manifest 中修改）
-4. 页面下方「⚙️ 代理配置」可修改：
-   - **监听端口**：自定义代理端口，保存后自动重启代理生效
-   - **上游代理（可选）**：填写 `host:port` 后所有请求转发到该上游代理（如 Clash 等）；留空则直连目标
-   - 配置保存在 `TRIM_PKGVAR/state.json`，重启应用后保留
+1. 打开应用「NAS全局代理」
+2. 填写代理服务器地址（`IP:端口`），如 `192.168.1.100:7890`
+3. 需要认证时填写用户名/密码
+4. 点击保存，然后打开开关
+5. 整个 NAS 新启动的程序（curl、下载、Docker 拉镜像等）走代理
+6. 已运行的服务需重启才生效；关闭开关即恢复直连
 
 ## 目录结构
 
@@ -51,7 +50,7 @@ proxy-switch/
 │   └── main              # 启动/停止/状态 控制脚本
 ├── app/
 │   ├── server/
-│   │   └── proxy_server.py   # 主程序：代理服务 + 管理 API + 静态页面
+│   │   └── proxy_server.py   # 主程序：管理 API + 系统代理配置 + 静态页面
 │   ├── ui/
 │   │   ├── config        # 桌面入口配置（网关前缀 + socket）
 │   │   └── images/       # 图标
@@ -59,37 +58,37 @@ proxy-switch/
 │       └── index.html    # 管理页面
 ├── config/
 │   ├── resource          # API Scope 声明
-│   └── privilege         # 运行用户/权限配置
+│   └── privilege         # 运行用户/权限配置（root 模式）
 ├── ICON.PNG / ICON_256.PNG  # 应用图标
-└── gen_icons.py          # 图标生成脚本（纯标准库手写 PNG）
+└── gen_icons.py          # 图标生成脚本
 ```
 
 ## 工作原理
 
-- `cmd/main` 启动时注入环境变量（`SOCKET_PATH` / `PROXY_PORT` / `STATE_FILE` / `WWW_DIR`）并拉起 `proxy_server.py`
-- `proxy_server.py` 同时运行两个服务：
-  - **代理服务**：监听 `PROXY_PORT`（默认 8888），处理 HTTP 请求与 HTTPS CONNECT
-  - **管理服务**：监听 Unix Socket（`app.sock`），通过 fnOS 统一网关暴露管理 API 与静态页面
-- 开关状态存于 `state.json`，重启自动恢复；关闭状态下代理端口拒绝连接
+- `cmd/main` 启动时注入环境变量（`SOCKET_PATH` / `STATE_FILE` / `WWW_DIR`）并拉起 `proxy_server.py`
+- `proxy_server.py` 以 **root** 运行（`config/privilege` 声明 `run-as: root`），提供管理 API 与静态页面
+- 开启代理时写入三处系统配置：
+  - `/etc/environment`：全局环境变量（标记块管理，不影响原有内容）
+  - `/etc/profile.d/proxy-switch.sh`：登录 shell 生效
+  - `/etc/systemd/system.conf.d/10-proxy-switch.conf`：systemd 服务全局环境（重启服务后生效）
+- 关闭代理时精确移除上述配置，恢复直连
+
+## 管理 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/status` | 查询开关状态、代理地址 |
+| POST | `/api/proxy/on` | 开启全局代理 |
+| POST | `/api/proxy/off` | 关闭全局代理 |
+| POST | `/api/config` | 保存配置 `{"proxy": "ip:port", "auth_user": "", "auth_pass": ""}` |
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SOCKET_PATH` | 统一网关 Unix Socket 路径 | `/tmp/proxy-switch.sock` |
-| `PROXY_PORT` | 代理监听端口（默认值，可被管理页配置覆盖） | `8888` |
 | `STATE_FILE` | 状态/配置文件路径 | `/tmp/proxy-switch-state.json` |
 | `WWW_DIR` | 前端静态页面目录 | 同目录 `www/` |
-
-## 管理 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/status` | 查询开关状态、当前端口、上游代理 |
-| GET | `/api/config` | 查询当前配置 |
-| POST | `/api/proxy/on` | 开启代理 |
-| POST | `/api/proxy/off` | 关闭代理 |
-| POST | `/api/config` | 保存配置 `{"port": 8888, "upstream": "host:port"}` |
 
 ## License
 

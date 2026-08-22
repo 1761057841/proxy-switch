@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>代理开关</title>
+<title>NAS 全局代理</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -14,7 +14,7 @@ body {
   color: #e2e8f0;
 }
 .card {
-  width: 440px; max-width: 92vw;
+  width: 460px; max-width: 92vw;
   background: rgba(30, 41, 59, .75);
   border: 1px solid rgba(148, 163, 184, .2);
   border-radius: 20px;
@@ -40,7 +40,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   font-family: ui-monospace, Consolas, "Courier New", monospace;
   font-size: 14px;
   color: #7dd3fc;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
   word-break: break-all;
   user-select: all;
 }
@@ -59,8 +59,6 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .switch input:checked + .slider { background: #059669; }
 .switch input:checked + .slider::before { transform: translateX(64px); background: #fff; }
-.hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; }
-.hint code { color: #7dd3fc; font-family: ui-monospace, Consolas, monospace; }
 .config {
   margin-top: 24px;
   padding-top: 20px;
@@ -96,12 +94,14 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .save-msg { text-align: center; font-size: 12px; margin-top: 10px; min-height: 16px; }
 .save-msg.ok { color: #4ade80; }
 .save-msg.err { color: #f87171; }
+.hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; text-align: left; }
+.hint b { color: #94a3b8; }
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>🔄 代理开关</h1>
-  <p class="sub">HTTP 代理服务 · 随时开启 / 关闭</p>
+  <h1>🌐 NAS 全局代理</h1>
+  <p class="sub">填写代理服务器 · 整个 NAS 上网走代理</p>
   <div class="status-row">
     <span class="dot" id="dot"></span>
     <span id="statusText">加载中…</span>
@@ -111,24 +111,31 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     <input type="checkbox" id="toggle">
     <span class="slider"></span>
   </label>
-  <p class="hint">
-    开启后，局域网设备可将 HTTP/HTTPS 代理设置为<br>
-    <code id="addrHint">—</code><br>
-    支持普通 HTTP 转发与 HTTPS 隧道（CONNECT）
-  </p>
+
   <div class="config">
-    <h2>⚙️ 代理配置</h2>
+    <h2>⚙️ 代理服务器</h2>
     <div class="field">
-      <label for="cfgPort">监听端口</label>
-      <input type="number" id="cfgPort" min="1" max="65535" placeholder="8888">
+      <label for="cfgProxy">代理服务器地址（IP:端口）</label>
+      <input type="text" id="cfgProxy" placeholder="如 192.168.1.100:7890">
+      <div class="tip">HTTP 代理格式，Clash / 机场代理常用</div>
     </div>
     <div class="field">
-      <label for="cfgUpstream">上游代理（可选）</label>
-      <input type="text" id="cfgUpstream" placeholder="如 192.168.1.100:7890，留空则直连">
-      <div class="tip">所有请求转发到该上游代理（HTTP 代理格式 host:port）</div>
+      <label for="cfgUser">用户名（可选）</label>
+      <input type="text" id="cfgUser" placeholder="需要认证才填">
     </div>
-    <button class="save-btn" id="saveBtn">保存并生效</button>
+    <div class="field">
+      <label for="cfgPass">密码（可选）</label>
+      <input type="password" id="cfgPass" placeholder="需要认证才填">
+    </div>
+    <button class="save-btn" id="saveBtn">保存</button>
     <div class="save-msg" id="saveMsg"></div>
+  </div>
+
+  <div class="hint">
+    <b>说明：</b><br>
+    · 开启后 NAS 新启动的程序走代理（curl、下载、Docker 拉镜像等）<br>
+    · 已运行的服务需重启才生效<br>
+    · 内网地址（192.168.x / 10.x / 172.16-31.x 等）自动直连，不受代理影响
   </div>
 </div>
 <script>
@@ -139,30 +146,27 @@ async function refresh() {
   try {
     const res = await fetch(API + '/api/status');
     const data = await res.json();
-    render(data.enabled, data.port);
-    document.getElementById('cfgPort').value = data.port;
-    document.getElementById('cfgUpstream').value = data.upstream || '';
+    render(data.enabled, data.proxy);
+    document.getElementById('cfgProxy').value = data.proxy || '';
+    document.getElementById('cfgUser').value = '';
+    document.getElementById('cfgPass').value = '';
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
 }
 
-function render(enabled, port) {
+function render(enabled, proxy) {
   const dot = document.getElementById('dot');
   const text = document.getElementById('statusText');
   const addr = document.getElementById('addr');
-  const addrHint = document.getElementById('addrHint');
   dot.className = 'dot ' + (enabled ? 'on' : 'off');
-  text.textContent = enabled ? '代理运行中' : '代理已停止';
-  const url = 'http://' + location.hostname + ':' + (port || 8888);
-  if (enabled) {
-    addr.textContent = url;
+  text.textContent = enabled ? '代理已开启' : '代理已关闭';
+  if (enabled && proxy) {
+    addr.textContent = '通过 ' + proxy;
     addr.classList.remove('empty');
-    addrHint.textContent = url;
   } else {
     addr.textContent = '—';
     addr.classList.add('empty');
-    addrHint.textContent = '—';
   }
   document.getElementById('toggle').checked = enabled;
 }
@@ -178,14 +182,15 @@ async function saveConfig() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        port: parseInt(document.getElementById('cfgPort').value, 10),
-        upstream: document.getElementById('cfgUpstream').value.trim()
+        proxy: document.getElementById('cfgProxy').value.trim(),
+        auth_user: document.getElementById('cfgUser').value.trim(),
+        auth_pass: document.getElementById('cfgPass').value
       })
     });
     const data = await res.json();
     if (data.ok) {
       msg.className = 'save-msg ok';
-      msg.textContent = '✅ 已保存' + (data.port ? '，当前端口 ' + data.port : '');
+      msg.textContent = '✅ 已保存' + (data.enabled ? '，代理运行中' : '（代理未开启）');
       await refresh();
     } else {
       msg.className = 'save-msg err';
@@ -198,16 +203,22 @@ async function saveConfig() {
   btn.disabled = false;
 }
 
-document.getElementById('saveBtn').addEventListener('click', saveConfig);
-
 document.getElementById('toggle').addEventListener('change', async (e) => {
   if (busy) { e.target.checked = !e.target.checked; return; }
   busy = true;
   const on = e.target.checked;
+  if (on && !document.getElementById('cfgProxy').value.trim()) {
+    msg = document.getElementById('saveMsg');
+    msg.className = 'save-msg err';
+    msg.textContent = '❌ 请先填写代理服务器地址';
+    e.target.checked = false;
+    busy = false;
+    return;
+  }
   try {
     const res = await fetch(API + (on ? '/api/proxy/on' : '/api/proxy/off'), { method: 'POST' });
     const data = await res.json();
-    render(data.enabled, data.port);
+    render(data.enabled, data.proxy);
   } catch (err) {
     e.target.checked = !on;
   }

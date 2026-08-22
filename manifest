@@ -1,7 +1,7 @@
 appname=proxy-switch
-version=1.0.0
-display_name=代理开关
-desc=一个简单的 HTTP 代理服务。可在管理页面随时开启或关闭代理，支持普通 HTTP 请求与 HTTPS 隧道（CONNECT）。
+version=1.1.0
+display_name=NAS全局代理
+desc=填写代理服务器地址（IP:端口），开启后整个 NAS 上网走代理；关闭恢复直连。支持可选认证，内网地址自动直连。
 source=thirdparty
 platform=all
 maintainer=fnOS-Dev
@@ -11,5 +11,4 @@ install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=proxy-switch.main
 ctl_stop=true
-service_port=8888
 checkport=false

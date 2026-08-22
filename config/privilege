@@ -1,6 +1,6 @@
 {
     "defaults": {
-        "run-as": "package"
+        "run-as": "root"
     },
     "username": "proxy-switch",
     "groupname": "proxy-switch"
