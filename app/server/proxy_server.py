@@ -219,6 +219,46 @@ def remove_proxy():
     save_state()
 
 
+# ---------------------------------------------------------------- 代理连通性测试
+
+def test_proxy_connectivity(proxy, user="", pw=""):
+    """通过指定代理访问外网测试 URL，验证代理是否可用。
+    返回 {"ok": bool, "via": 测试点, "latency_ms": 耗时, "detail": 描述, "error": 失败原因}
+    """
+    import time
+    import urllib.parse
+    import urllib.request
+
+    proxy = (proxy or "").strip()
+    if not proxy:
+        return {"ok": False, "error": "请先填写代理服务器地址"}
+    proxy_url = "http://" + proxy
+    if user:
+        u = urllib.parse.quote(user, safe="")
+        p = urllib.parse.quote(pw, safe="")
+        proxy_url = "http://%s:%s@%s" % (u, p, proxy)
+    handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
+    opener = urllib.request.build_opener(handler)
+    targets = [
+        ("https://www.gstatic.com/generate_204", "GStatic"),
+        ("https://cp.cloudflare.com/generate_204", "Cloudflare"),
+        ("http://www.gstatic.com/generate_204", "GStatic-HTTP"),
+    ]
+    last_err = ""
+    for url, name in targets:
+        start = time.time()
+        try:
+            resp = opener.open(url, timeout=8)
+            ms = int((time.time() - start) * 1000)
+            return {"ok": True, "via": name, "status": resp.getcode(),
+                    "latency_ms": ms,
+                    "detail": "代理可用，%s 响应 %d，耗时 %dms" % (name, resp.getcode(), ms)}
+        except Exception as e:
+            last_err = str(e)
+    return {"ok": False, "error": last_err[:200],
+            "detail": "代理连接失败：%s" % last_err[:150]}
+
+
 # ---------------------------------------------------------------- 管理 API + 静态页面
 
 class AdminHandler(BaseHTTPRequestHandler):
@@ -277,6 +317,17 @@ class AdminHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "enabled": bool(_state.get("enabled")), "proxy": proxy})
             except Exception:
                 self.send_json({"ok": False, "error": "代理地址格式应为 IP:端口，如 192.168.1.100:7890"})
+        elif path == "/api/test":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length) if length else b"{}"
+                cfg = json.loads(body.decode("utf-8")) if body.strip() else {}
+                proxy = (cfg.get("proxy") or "").strip() or _state.get("proxy", "")
+                user = (cfg.get("auth_user") or "").strip() or _state.get("auth_user", "")
+                pw = cfg.get("auth_pass") or _state.get("auth_pass", "")
+                self.send_json(test_proxy_connectivity(proxy, user, pw))
+            except Exception:
+                self.send_json({"ok": False, "error": "测试失败，请检查输入"})
         else:
             self.send_error(404)
 

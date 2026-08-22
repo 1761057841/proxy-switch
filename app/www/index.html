@@ -45,6 +45,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   user-select: all;
 }
 .addr.empty { color: #64748b; }
+.addr.saved { color: #fbbf24; border-style: solid; }
 .switch {
   position: relative; display: inline-block; width: 120px; height: 56px; cursor: pointer;
 }
@@ -81,19 +82,28 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .field input:focus { border-color: #38bdf8; }
 .field .tip { font-size: 11px; color: #64748b; margin-top: 4px; }
+.btn-row { display: flex; gap: 10px; margin-top: 6px; }
 .save-btn {
-  width: 100%; padding: 10px;
-  margin-top: 6px;
+  flex: 1; padding: 10px;
   background: linear-gradient(135deg, #0ea5e9, #2563eb);
   border: none; border-radius: 8px;
   color: #fff; font-size: 14px; font-weight: 600;
   cursor: pointer; transition: opacity .2s;
 }
-.save-btn:hover { opacity: .85; }
-.save-btn:disabled { opacity: .5; cursor: not-allowed; }
-.save-msg { text-align: center; font-size: 12px; margin-top: 10px; min-height: 16px; }
-.save-msg.ok { color: #4ade80; }
-.save-msg.err { color: #f87171; }
+.test-btn {
+  flex: 0 0 auto; padding: 10px 16px;
+  background: rgba(148, 163, 184, .15);
+  border: 1px solid rgba(148, 163, 184, .4);
+  border-radius: 8px;
+  color: #cbd5e1; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: opacity .2s;
+}
+.save-btn:hover, .test-btn:hover { opacity: .85; }
+.save-btn:disabled, .test-btn:disabled { opacity: .5; cursor: not-allowed; }
+.msg { text-align: center; font-size: 13px; margin-top: 10px; min-height: 18px; line-height: 1.5; }
+.msg.ok { color: #4ade80; }
+.msg.err { color: #f87171; }
+.msg.info { color: #fbbf24; }
 .hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; text-align: left; }
 .hint b { color: #94a3b8; }
 </style>
@@ -127,12 +137,16 @@ h1 { font-size: 22px; margin-bottom: 6px; }
       <label for="cfgPass">密码（可选）</label>
       <input type="password" id="cfgPass" placeholder="需要认证才填">
     </div>
-    <button class="save-btn" id="saveBtn">保存</button>
-    <div class="save-msg" id="saveMsg"></div>
+    <div class="btn-row">
+      <button class="save-btn" id="saveBtn" type="button">保存</button>
+      <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
+    </div>
+    <div class="msg" id="msg"></div>
   </div>
 
   <div class="hint">
     <b>说明：</b><br>
+    · 保存后点「测试连接」可验证代理是否可用<br>
     · 开启后 NAS 新启动的程序走代理（curl、下载、Docker 拉镜像等）<br>
     · 已运行的服务需重启才生效<br>
     · 内网地址（192.168.x / 10.x / 172.16-31.x 等）自动直连，不受代理影响
@@ -148,8 +162,6 @@ async function refresh() {
     const data = await res.json();
     render(data.enabled, data.proxy);
     document.getElementById('cfgProxy').value = data.proxy || '';
-    document.getElementById('cfgUser').value = '';
-    document.getElementById('cfgPass').value = '';
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
@@ -161,22 +173,31 @@ function render(enabled, proxy) {
   const addr = document.getElementById('addr');
   dot.className = 'dot ' + (enabled ? 'on' : 'off');
   text.textContent = enabled ? '代理已开启' : '代理已关闭';
-  if (enabled && proxy) {
-    addr.textContent = '通过 ' + proxy;
-    addr.classList.remove('empty');
+  if (proxy) {
+    if (enabled) {
+      addr.textContent = '通过 ' + proxy;
+      addr.className = 'addr';
+    } else {
+      addr.textContent = proxy + '（未开启）';
+      addr.className = 'addr saved';
+    }
   } else {
     addr.textContent = '—';
-    addr.classList.add('empty');
+    addr.className = 'addr empty';
   }
   document.getElementById('toggle').checked = enabled;
 }
 
+function setMsg(text, type) {
+  const msg = document.getElementById('msg');
+  msg.className = 'msg' + (type ? ' ' + type : '');
+  msg.textContent = text || '';
+}
+
 async function saveConfig() {
   const btn = document.getElementById('saveBtn');
-  const msg = document.getElementById('saveMsg');
   btn.disabled = true;
-  msg.className = 'save-msg';
-  msg.textContent = '保存中…';
+  setMsg('保存中…');
   try {
     const res = await fetch(API + '/api/config', {
       method: 'POST',
@@ -187,40 +208,75 @@ async function saveConfig() {
         auth_pass: document.getElementById('cfgPass').value
       })
     });
-    const data = await res.json();
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* 网关可能返回非 JSON */ }
     if (data.ok) {
-      msg.className = 'save-msg ok';
-      msg.textContent = '✅ 已保存' + (data.enabled ? '，代理运行中' : '（代理未开启）');
+      setMsg('✅ 已保存：' + data.proxy + (data.enabled ? '（代理运行中）' : '（未开启，拨动开关生效）'), 'ok');
       await refresh();
     } else {
-      msg.className = 'save-msg err';
-      msg.textContent = '❌ ' + (data.error || '保存失败');
+      setMsg('❌ ' + (data.error || '保存失败'), 'err');
     }
   } catch (err) {
-    msg.className = 'save-msg err';
-    msg.textContent = '❌ 无法连接服务';
+    setMsg('❌ 无法连接服务', 'err');
   }
   btn.disabled = false;
 }
+
+async function testConfig() {
+  const btn = document.getElementById('testBtn');
+  const proxy = document.getElementById('cfgProxy').value.trim();
+  if (!proxy) {
+    setMsg('❌ 请先填写代理服务器地址', 'err');
+    return;
+  }
+  btn.disabled = true;
+  setMsg('🔍 测试中，请稍候…（最长约 10 秒）', 'info');
+  try {
+    const res = await fetch(API + '/api/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proxy: proxy,
+        auth_user: document.getElementById('cfgUser').value.trim(),
+        auth_pass: document.getElementById('cfgPass').value
+      })
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (data.ok) {
+      setMsg('✅ ' + (data.detail || '代理连接成功') + '（' + data.via + '，' + data.latency_ms + 'ms）', 'ok');
+    } else {
+      setMsg('❌ ' + (data.error || data.detail || '代理连接失败'), 'err');
+    }
+  } catch (err) {
+    setMsg('❌ 无法连接服务', 'err');
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('saveBtn').addEventListener('click', saveConfig);
+document.getElementById('testBtn').addEventListener('click', testConfig);
 
 document.getElementById('toggle').addEventListener('change', async (e) => {
   if (busy) { e.target.checked = !e.target.checked; return; }
   busy = true;
   const on = e.target.checked;
   if (on && !document.getElementById('cfgProxy').value.trim()) {
-    msg = document.getElementById('saveMsg');
-    msg.className = 'save-msg err';
-    msg.textContent = '❌ 请先填写代理服务器地址';
+    setMsg('❌ 请先填写代理服务器地址', 'err');
     e.target.checked = false;
     busy = false;
     return;
   }
   try {
     const res = await fetch(API + (on ? '/api/proxy/on' : '/api/proxy/off'), { method: 'POST' });
-    const data = await res.json();
-    render(data.enabled, data.proxy);
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    render(data.enabled, data.proxy !== undefined ? data.proxy : document.getElementById('cfgProxy').value);
+    if (data.enabled) setMsg('✅ 代理已开启', 'ok');
+    else if (!data.enabled && on === false) setMsg('代理已关闭', 'info');
   } catch (err) {
     e.target.checked = !on;
+    setMsg('❌ 无法连接服务', 'err');
   }
   busy = false;
 });
