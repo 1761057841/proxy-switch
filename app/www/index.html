@@ -319,7 +319,7 @@ body {
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
 
 /* ===== 实时连接面板 ===== */
-.conn-panel { margin-top: 18px; }
+.conn-panel { margin-bottom: 18px; }
 .conn-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 16px;
@@ -479,21 +479,6 @@ body {
       <div class="msg" id="msg"></div>
     </section>
 
-    <!-- 右栏：订阅机场 -->
-    <section class="panel subs">
-      <div class="subs-head">
-        <h2 class="panel-title">📡 订阅机场</h2>
-        <div class="subs-tools">
-          <button class="test-btn sub-btn" id="subAddBtn" type="button">➕ 添加订阅</button>
-          <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
-          <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
-        </div>
-      </div>
-      <div class="msg" id="subMsg"></div>
-      <div id="subList" class="sub-grid"></div>
-      <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
-    </section>
-
     <!-- 实时连接 -->
     <section class="panel conn-panel">
       <div class="conn-head">
@@ -508,6 +493,21 @@ body {
         <div class="conn-empty">暂无活动连接（有流量经过时会显示在这里）</div>
       </div>
       <div class="sub-hint">实时显示当前经过代理的连接：目标地址、走的节点、匹配规则、上下行流量。<b>如果看到走的是「自动选择」节点，说明自动模式正在生效</b>；可点「全部断开」立即重置连接。</div>
+    </section>
+
+    <!-- 右栏：订阅机场 -->
+    <section class="panel subs">
+      <div class="subs-head">
+        <h2 class="panel-title">📡 订阅机场</h2>
+        <div class="subs-tools">
+          <button class="test-btn sub-btn" id="subAddBtn" type="button">➕ 添加订阅</button>
+          <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
+          <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
+        </div>
+      </div>
+      <div class="msg" id="subMsg"></div>
+      <div id="subList" class="sub-grid"></div>
+      <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
     </section>
   </main>
 
