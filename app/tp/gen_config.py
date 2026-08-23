@@ -113,6 +113,27 @@ def main():
     with open(BASE_FILE, "r", encoding="utf-8") as f:
         base = f.read()
 
+    # 读取端口开关状态，生成时应用（关闭的端口置 0 / 改本地监听）
+    ports_state = {}
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                _st = json.load(f)
+            ports_state = _st.get("ports") or {}
+    except Exception:
+        pass
+    if ports_state.get("mixed") is False:
+        base = re.sub(r"(?m)^mixed-port:\s*\d+", "mixed-port: 0", base)
+    if ports_state.get("redir") is False:
+        base = re.sub(r"(?m)^redir-port:\s*\d+", "redir-port: 0", base)
+    if ports_state.get("controller") is False:
+        base = re.sub(r"(?m)^external-controller:\s*'[^']*'",
+                      "external-controller: '127.0.0.1:9090'", base)
+    if ports_state.get("dns") is False:
+        # DNS 关闭：改监听为本机随机端口（禁外部访问，保 internal dns 可用）
+        base = re.sub(r"(?m)^    listen: 0\.0\.0\.0:53",
+                      "    listen: 127.0.0.1:0", base)
+
     # 读取当前代理模式，生成时 MATCH 行指向对应组（避免覆盖用户手动切换的模式）
     cur_mode = "manual"
     try:

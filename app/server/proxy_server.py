@@ -300,6 +300,79 @@ def get_mode():
     return mode
 
 
+# 端口信息：标识 → (端口, 名称, 作用说明, 默认开启)
+PORTS_INFO = {
+    "mixed":      {"port": 7890, "name": "混合代理", "desc": "HTTP/SOCKS5 代理，其他设备手动设置代理时使用", "default": True},
+    "redir":      {"port": 7893, "name": "透明代理", "desc": "本机流量重定向入口（iptables 劫持后进入）", "default": True},
+    "controller": {"port": 9090, "name": "管理 API", "desc": "mihomo 控制接口，面板/节点/连接数据来源", "default": True},
+    "dns":        {"port": 53,   "name": "DNS 服务", "desc": "域名解析（透明代理使用，关闭后本机 DNS 回退系统）", "default": True},
+}
+
+
+def get_ports_state():
+    """返回各端口开关状态（默认开）"""
+    ps = _state.get("ports") or {}
+    out = {}
+    for k, info in PORTS_INFO.items():
+        out[k] = {
+            "port": info["port"],
+            "name": info["name"],
+            "desc": info["desc"],
+            "on": ps.get(k, info["default"]),
+        }
+    return out
+
+
+def set_port_state(port, on):
+    """开关端口：改 tp-config.yaml 对应行 → 热重载
+    返回 (ok, msg)
+    """
+    if port not in PORTS_INFO:
+        return False, "未知端口: %s" % port
+    if not os.path.exists(TP_CONFIG):
+        return False, "配置文件不存在: %s" % TP_CONFIG
+    import re
+    try:
+        with open(TP_CONFIG, "r", encoding="utf-8") as f:
+            cfg = f.read()
+    except Exception as e:
+        return False, "读取配置失败: %s" % e
+    # 按端口类型修改配置行
+    if port == "mixed":
+        new_cfg, n = re.subn(r"(?m)^mixed-port:\s*\d+",
+                             "mixed-port: %d" % (7890 if on else 0), cfg)
+    elif port == "redir":
+        new_cfg, n = re.subn(r"(?m)^redir-port:\s*\d+",
+                             "redir-port: %d" % (7893 if on else 0), cfg)
+    elif port == "controller":
+        new_cfg, n = re.subn(r"(?m)^external-controller:\s*'[^']*'",
+                             "external-controller: '%s'" % ("0.0.0.0:9090" if on else "127.0.0.1:9090"), cfg)
+    elif port == "dns":
+        if on:
+            new_cfg, n = re.subn(r"(?m)^    listen: 127\.0\.0\.1:0",
+                                 "    listen: 0.0.0.0:53", cfg)
+        else:
+            new_cfg, n = re.subn(r"(?m)^    listen: 0\.0\.0\.0:53",
+                                 "    listen: 127.0.0.1:0", cfg)
+    if n == 0:
+        return False, "配置中未找到 %s 端口行" % port
+    try:
+        with open(TP_CONFIG, "w", encoding="utf-8") as f:
+            f.write(new_cfg)
+    except Exception as e:
+        return False, "写入配置失败: %s" % e
+    # 热重载
+    ok, out = reload_mihomo()
+    if not ok:
+        return False, "配置已写入但重载失败: %s" % out
+    ps = dict(_state.get("ports") or {})
+    ps[port] = on
+    _state["ports"] = ps
+    save_state()
+    return True, "%s端口已%s" % (PORTS_INFO[port]["name"], "开启" if on else "关闭")
+
+
+
 def set_mode(mode):
     """切换代理模式：改 tp-config.yaml 的 MATCH 行 → mihomo 热重载
     返回 (ok, msg)
@@ -408,6 +481,8 @@ class AdminHandler(BaseHTTPRequestHandler):
                 "proxy": "mihomo 透明代理",
                 "mode": get_mode(),
             })
+        elif path == "/api/ports":
+            self.send_json({"ok": True, "ports": get_ports_state()})
         elif path == "/api/mode":
             self.send_json({"ok": True, "mode": get_mode(), "groups": MODE_GROUPS})
         elif path == "/api/config":
@@ -447,6 +522,20 @@ class AdminHandler(BaseHTTPRequestHandler):
                 return
             ok, msg = set_mode(mode)
             self.send_json({"ok": ok, "mode": get_mode(), "msg": msg})
+        elif path == "/api/ports/set":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length).decode("utf-8") if length else ""
+                body = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                body = {}
+            port = (body.get("port") or "").strip()
+            on = bool(body.get("on"))
+            if port not in PORTS_INFO:
+                self.send_json({"ok": False, "error": "未知端口标识: %s" % port})
+                return
+            ok, msg = set_port_state(port, on)
+            self.send_json({"ok": ok, "msg": msg, "ports": get_ports_state()})
         elif path == "/api/proxy/on":
             # 先确保配置已生成（有订阅拉取 / 无订阅静态），再启动
             subs = get_subscriptions()

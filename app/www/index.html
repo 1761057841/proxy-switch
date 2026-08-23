@@ -318,6 +318,61 @@ body {
 .px-delay.bad { color: #f87171; background: rgba(248, 113, 113, .14); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .25); }
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
 
+/* ===== 端口管理面板 ===== */
+.ports-panel { margin-bottom: 18px; }
+.ports-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+}
+.ports-sub { font-size: 12px; color: #64748b; }
+.ports-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+  margin-top: 14px;
+}
+.ports-empty { grid-column: 1 / -1; text-align: center; color: #64748b; font-size: 13px; padding: 10px; }
+.port-card {
+  background: rgba(15, 23, 42, .55);
+  border: 1px solid rgba(148, 163, 184, .12);
+  border-radius: 14px; padding: 12px 14px;
+  transition: .2s;
+  position: relative;
+}
+.port-card:hover { border-color: rgba(56, 189, 248, .3); transform: translateY(-1px); }
+.port-card.off { opacity: .55; border-style: dashed; }
+.port-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.port-num {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 20px; font-weight: 800; color: #7dd3fc;
+  letter-spacing: .5px;
+}
+.port-card.off .port-num { color: #64748b; text-decoration: line-through; }
+.port-switch {
+  width: 42px; height: 22px; border-radius: 999px;
+  background: rgba(148, 163, 184, .25);
+  position: relative; cursor: pointer; flex-shrink: 0;
+  transition: .25s; border: none;
+}
+.port-switch::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; transition: .25s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .4);
+}
+.port-switch.on { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.port-switch.on::after { left: 22px; }
+.port-name { font-size: 13px; font-weight: 700; color: #e2e8f0; margin-top: 8px; }
+.port-desc { font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.5; }
+.ports-hint {
+  margin-top: 12px; font-size: 11.5px; color: #64748b;
+  background: rgba(148, 163, 184, .06);
+  border: 1px solid rgba(148, 163, 184, .1);
+  border-radius: 10px; padding: 8px 12px; line-height: 1.6;
+}
+.ports-hint b { color: #fbbf24; }
+@media (max-width: 500px) {
+  .ports-grid { grid-template-columns: 1fr; }
+}
+
 /* ===== 实时连接面板 ===== */
 .conn-panel { margin-bottom: 18px; display: flex; flex-direction: column; }
 .conn-head {
@@ -542,6 +597,20 @@ body {
         <div class="conn-empty">暂无活动连接（有流量经过时会显示在这里）</div>
       </div>
       <div class="sub-hint">实时显示当前经过代理的连接：目标地址、走的节点、匹配规则、上下行流量。<b>如果看到走的是「自动选择」节点，说明自动模式正在生效</b>；可点「全部断开」立即重置连接。</div>
+    </section>
+
+    <!-- 端口管理 -->
+    <section class="panel ports-panel">
+      <div class="ports-head">
+        <h2 class="panel-title">🔌 端口管理</h2>
+        <span class="ports-sub">应用使用的端口，可独立开关</span>
+      </div>
+      <div class="ports-grid" id="portsGrid">
+        <div class="ports-empty">加载中…</div>
+      </div>
+      <div class="ports-hint">
+        <b>注意：</b>关闭「透明代理」或「DNS 服务」会导致本机代理失效（其他设备仍可用 7890）；关闭「管理 API」后仅本机可访问，面板数据不受影响。
+      </div>
     </section>
 
     <!-- 右栏：订阅机场 -->
@@ -1205,6 +1274,61 @@ async function loadStats() {
   } catch (e) {}
 }
 
+/* ===== 端口管理 ===== */
+async function loadPorts() {
+  try {
+    const res = await fetch(API + '/api/ports');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d.ok || !d.ports) return;
+    const grid = document.getElementById('portsGrid');
+    const order = ['mixed', 'redir', 'controller', 'dns'];
+    grid.innerHTML = order.map(k => {
+      const p = d.ports[k];
+      if (!p) return '';
+      return '<div class="port-card' + (p.on ? '' : ' off') + '" id="portCard-' + k + '">' +
+        '<div class="port-top">' +
+          '<span class="port-num">' + p.port + '</span>' +
+          '<button class="port-switch' + (p.on ? ' on' : '') + '" id="portSw-' + k + '" data-port="' + k + '" type="button" title="' + (p.on ? '点击关闭' : '点击开启') + '"></button>' +
+        '</div>' +
+        '<div class="port-name">' + p.name + '</div>' +
+        '<div class="port-desc">' + p.desc + '</div>' +
+      '</div>';
+    }).join('');
+    // 绑定开关事件
+    grid.querySelectorAll('.port-switch').forEach(btn => {
+      btn.addEventListener('click', () => togglePort(btn.dataset.port));
+    });
+  } catch (e) {}
+}
+
+let portBusy = false;
+async function togglePort(port) {
+  if (portBusy) return;
+  portBusy = true;
+  const btn = document.getElementById('portSw-' + port);
+  if (btn) btn.disabled = true;
+  const wasOn = btn ? btn.classList.contains('on') : false;
+  try {
+    const res = await fetch(API + '/api/ports/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: port, on: !wasOn })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      loadPorts();
+      const name = document.querySelector('#portCard-' + port + ' .port-name');
+      setMsg(d.msg, 'ok');
+    } else {
+      setMsg('❌ ' + (d.error || d.msg), 'err');
+    }
+  } catch (e) {
+    setMsg('❌ 端口切换失败', 'err');
+  }
+  portBusy = false;
+}
+
 // 连接面板事件
 document.getElementById('connRefreshBtn').addEventListener('click', loadConnections);
 document.getElementById('connCloseBtn').addEventListener('click', closeAllConnections);
@@ -1227,6 +1351,9 @@ window.addEventListener('resize', syncConnHeight);
 // 控制台内容（msg 提示等）变化时跟随 + 初次同步
 syncConnHeight();
 setInterval(syncConnHeight, 2000);
+
+// 端口管理加载
+loadPorts();
 
 refresh();
 </script>
