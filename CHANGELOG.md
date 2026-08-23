@@ -1,6 +1,12 @@
 # Changelog
 
+## v2.7.3 (2026-08-23)
+
+**修复**
+- 应用中心停用应用时，透明代理残留（mihomo/iptables/DNS 未清理）：cmd/main stop 现在会调用 tp.sh stop 彻底停止代理
+
 ## v2.7.2 (2026-08-23)
+
 
 **修复**
 - 应用中心无法访问：DNS fake-ip-filter 排除 `*.fnnas.com` / `*.fnnas.net`，DIRECT 直连解析真实 IP
