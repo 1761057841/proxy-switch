@@ -318,6 +318,75 @@ body {
 .px-delay.bad { color: #f87171; background: rgba(248, 113, 113, .14); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .25); }
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
 
+/* ===== 实时连接面板 ===== */
+.conn-panel { margin-top: 18px; }
+.conn-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, .14);
+}
+.conn-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.conn-count {
+  font-size: 12px; font-weight: 700; color: #7dd3fc;
+  background: rgba(56, 189, 248, .1); border: 1px solid rgba(56, 189, 248, .25);
+  padding: 4px 10px; border-radius: 999px; letter-spacing: .3px;
+}
+.conn-list {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 340px; overflow-y: auto;
+  padding-right: 4px;
+}
+.conn-item {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(15, 23, 42, .5);
+  border: 1px solid rgba(148, 163, 184, .1);
+  border-radius: 10px; padding: 8px 12px;
+  font-size: 12px;
+  transition: .2s;
+}
+.conn-item:hover { border-color: rgba(56, 189, 248, .3); background: rgba(15, 23, 42, .75); }
+.conn-item .conn-dest {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px; color: #e2e8f0; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.conn-item .conn-dest .conn-proto {
+  font-size: 10px; color: #64748b; font-weight: 500;
+  border: 1px solid rgba(148, 163, 184, .2); border-radius: 4px;
+  padding: 0 4px; margin-left: 6px;
+}
+.conn-item .conn-node {
+  max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #a78bfa; font-weight: 600; font-size: 11px;
+  background: rgba(167, 139, 250, .1); border: 1px solid rgba(167, 139, 250, .2);
+  padding: 2px 8px; border-radius: 999px;
+}
+.conn-item .conn-node.auto-node {
+  color: #34d399; background: rgba(52, 211, 153, .1);
+  border-color: rgba(52, 211, 153, .3);
+}
+.conn-item .conn-rule {
+  color: #94a3b8; font-size: 11px;
+  background: rgba(148, 163, 184, .08);
+  padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap;
+}
+.conn-item .conn-up {
+  color: #7dd3fc; font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+  white-space: nowrap; min-width: 66px; text-align: right;
+}
+.conn-item .conn-down {
+  color: #34d399; font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+  white-space: nowrap; min-width: 66px; text-align: right;
+}
+.conn-empty {
+  text-align: center; color: #64748b; font-size: 12px;
+  padding: 24px 0;
+}
+.conn-list::-webkit-scrollbar { width: 6px; }
+.conn-list::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, .25); border-radius: 3px; }
+
 /* ===== 底部说明 ===== */
 .hint {
   margin-top: 20px; font-size: 12px; color: #94a3b8; line-height: 1.9;
@@ -423,6 +492,22 @@ body {
       <div class="msg" id="subMsg"></div>
       <div id="subList" class="sub-grid"></div>
       <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
+    </section>
+
+    <!-- 实时连接 -->
+    <section class="panel conn-panel">
+      <div class="conn-head">
+        <h2 class="panel-title">🔗 实时连接</h2>
+        <div class="conn-tools">
+          <span class="conn-count" id="connCount">0 条</span>
+          <button class="test-btn sub-btn" id="connRefreshBtn" type="button">⟳ 刷新</button>
+          <button class="test-btn sub-btn sub-clear" id="connCloseBtn" type="button">✂ 全部断开</button>
+        </div>
+      </div>
+      <div class="conn-list" id="connList">
+        <div class="conn-empty">暂无活动连接（有流量经过时会显示在这里）</div>
+      </div>
+      <div class="sub-hint">实时显示当前经过代理的连接：目标地址、走的节点、匹配规则、上下行流量。<b>如果看到走的是「自动选择」节点，说明自动模式正在生效</b>；可点「全部断开」立即重置连接。</div>
     </section>
   </main>
 
@@ -972,6 +1057,91 @@ document.getElementById('localToggle').addEventListener('change', async (e) => {
   }
   busy = false;
 });
+
+/* ===== 实时连接面板 ===== */
+let connTimer = null;
+let prevBytes = {};  // id -> {up, down, ts} 用于计算速度
+
+function fmtBytes(b) {
+  if (b === undefined || b === null) return '0 B';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+function connSpeed(id, up, down) {
+  const now = Date.now();
+  const prev = prevBytes[id];
+  prevBytes[id] = { up, down, ts: now };
+  if (!prev) return { up: '', down: '' };
+  const dt = (now - prev.ts) / 1000;
+  if (dt <= 0) return { up: '', down: '' };
+  const upS = (up - prev.up) / dt;
+  const downS = (down - prev.down) / dt;
+  return {
+    up: upS > 0 ? fmtBytes(upS) + '/s' : '',
+    down: downS > 0 ? fmtBytes(downS) + '/s' : '',
+  };
+}
+
+function renderConnections(data) {
+  const list = document.getElementById('connList');
+  const count = document.getElementById('connCount');
+  const cs = data && data.connections ? data.connections : [];
+  count.textContent = cs.length + ' 条';
+  if (!cs.length) {
+    list.innerHTML = '<div class="conn-empty">暂无活动连接（有流量经过时会显示在这里）</div>';
+    return;
+  }
+  // 按下载量排序，最多显示 80 条
+  const items = cs.slice().sort((a, b) => (b.download || 0) - (a.download || 0)).slice(0, 80);
+  list.innerHTML = items.map(c => {
+    const m = c.metadata || {};
+    const dest = m.host || m.destinationIP || '?';
+    const port = m.destinationPort || '';
+    const chains = c.chains || [];
+    const node = chains.length ? chains[chains.length - 1] : 'DIRECT';
+    const rule = c.rule || '';
+    const isAuto = chains.includes('自动选择') || chains.includes('故障转移');
+    const sp = connSpeed(c.id, c.upload || 0, c.download || 0);
+    return `<div class="conn-item">
+      <span class="conn-dest" title="${dest}:${port}">${dest}<span class="conn-proto">${m.network || ''}${port ? ':' + port : ''}</span></span>
+      <span class="conn-node${isAuto ? ' auto-node' : ''}" title="${chains.join(' → ')}">${isAuto ? '⚡' : ''}${node}</span>
+      <span class="conn-rule">${rule}</span>
+      <span class="conn-up" title="上传">▲ ${fmtBytes(c.upload || 0)}${sp.up ? ' · ' + sp.up : ''}</span>
+      <span class="conn-down" title="下载">▼ ${fmtBytes(c.download || 0)}${sp.down ? ' · ' + sp.down : ''}</span>
+    </div>`;
+  }).join('');
+}
+
+async function loadConnections() {
+  try {
+    const res = await fetch(API + '/api/mihomo/connections');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderConnections(data);
+  } catch (e) {
+    // 静默失败（代理关闭时无连接数据）
+  }
+}
+
+async function closeAllConnections() {
+  try {
+    await fetch(API + '/api/mihomo/connections', { method: 'DELETE' });
+    prevBytes = {};
+    loadConnections();
+    setMsg('✂ 已断开全部连接', 'ok');
+  } catch (e) {
+    setMsg('❌ 断开失败', 'err');
+  }
+}
+
+// 连接面板事件
+document.getElementById('connRefreshBtn').addEventListener('click', loadConnections);
+document.getElementById('connCloseBtn').addEventListener('click', closeAllConnections);
+// 每 3 秒自动刷新
+connTimer = setInterval(loadConnections, 3000);
 
 refresh();
 </script>

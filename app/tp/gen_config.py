@@ -31,6 +31,9 @@ OUT_FILE = os.path.join(BASE, "tp-config.yaml")
 # 保留真实节点的过滤正则（排除机场订阅里的流量信息伪节点）
 NODE_FILTER = r"(?i)(🇯🇵|🇭🇰|🇺🇸|🇸🇬|🇹🇼|🇰🇷|🇩🇪|🇯p|日本|香港|新加坡|美国|台湾|韩国|德国|英国|法国|澳大利亚)"
 
+# 代理模式 → MATCH 行指向的组名（与 proxy_server.py MODE_GROUPS 保持一致）
+MODE_GROUPS = {"manual": "PROXY", "auto": "自动选择", "fallback": "故障转移"}
+
 PROVIDER_TMPL = """proxy-providers:
 {providers}
 proxy-groups:
@@ -109,6 +112,26 @@ def main():
 
     with open(BASE_FILE, "r", encoding="utf-8") as f:
         base = f.read()
+
+    # 读取当前代理模式，生成时 MATCH 行指向对应组（避免覆盖用户手动切换的模式）
+    cur_mode = "manual"
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                _st = json.load(f)
+            m = _st.get("mode") or "manual"
+            if m in MODE_GROUPS:
+                cur_mode = m
+    except Exception:
+        pass
+    match_group = MODE_GROUPS[cur_mode]
+    # 替换 MATCH 行指向目标组
+    new_base, n = re.subn(r"(?m)^(\s*-\s*'MATCH,)[^']*'",
+                          r"\g<1>%s'" % match_group, base)
+    if n > 0:
+        base = new_base
+    else:
+        print("WARN: 模板中未找到 MATCH 行，无法应用模式 %s" % cur_mode)
 
     if subs:
         provider_lines = []
