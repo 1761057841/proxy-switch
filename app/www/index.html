@@ -122,11 +122,12 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .sub-icon-btn:hover { background: rgba(148, 163, 184, .25); }
 .sub-icon-btn.del:hover { background: rgba(239, 68, 68, .25); border-color: rgba(239, 68, 68, .5); color: #fca5a5; }
-.sub-card-mid { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.sub-traffic-big { font-size: 22px; font-weight: 700; color: #f0abfc; font-family: ui-monospace, Consolas, monospace; }
+.sub-card-mid { margin-bottom: 10px; }
+.sub-traffic-num { font-size: 13px; font-weight: 600; color: #f0abfc; font-family: ui-monospace, Consolas, monospace; }
 .sub-traffic-label { font-size: 11px; color: #94a3b8; }
+.sub-traffic-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
 .sub-traffic-bar {
-  flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+  width: 100%; height: 6px; border-radius: 3px; overflow: hidden;
   background: rgba(148, 163, 184, .15); position: relative;
 }
 .sub-traffic-fill {
@@ -320,11 +321,11 @@ function renderSubList() {
         '<button class="sub-icon-btn del" data-act="del" title="删除">🗑</button>' +
       '</div>' +
       '<div class="sub-card-mid">' +
-        '<div>' +
-          '<div class="sub-traffic-big">' + esc(trafficMain) + '</div>' +
-          '<div class="sub-traffic-label">' + (st.trafficTotal ? '已用 / 总流量' : '剩余流量') + '</div>' +
-        '</div>' +
         '<div class="sub-traffic-bar"><div class="sub-traffic-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="sub-traffic-row">' +
+          '<span class="sub-traffic-num">' + esc(trafficMain) + '</span>' +
+          '<span class="sub-traffic-label">' + (st.trafficTotal ? '已用 / 总流量' : '剩余流量') + '</span>' +
+        '</div>' +
       '</div>' +
       '<div class="sub-card-bottom">' +
         '<span>到期时间: <span class="exp">' + (st.expire || '—') + '</span></span>' +
