@@ -2,13 +2,40 @@
 
 ### 安装后初始化透明代理目录
 ### - 创建 /vol1/@appdata/proxy-switch/transparent-proxy/
-### - 部署 tp.sh（开关脚本）与 gen_config.py（订阅配置生成器）
-### - 若已有 mihomo/配置则复用，否则提示用户放置
+### - 部署 mihomo 二进制 + geoip 数据 + tp.sh + gen_config.py（应用包内置，开箱即用）
+### - 若已有文件则保留（用户可能放了自己的版本）
 
 TP_DIR=/vol1/@appdata/proxy-switch/transparent-proxy
-APP_TP="${TRIM_APPDEST}/tp"   # 应用包内置脚本目录
+APP_TP="${TRIM_APPDEST}/tp"   # 应用包内置脚本/二进制目录
 
 mkdir -p "$TP_DIR"
+
+# 部署 mihomo 二进制（缺失时）
+if [ ! -x "$TP_DIR/mihomo" ]; then
+    if [ -f "$APP_TP/mihomo" ]; then
+        cp "$APP_TP/mihomo" "$TP_DIR/mihomo"
+        chmod 755 "$TP_DIR/mihomo"
+        echo "已部署 mihomo 二进制"
+    fi
+fi
+
+# 部署 geoip 数据（缺失时）
+if [ ! -f "$TP_DIR/geoip.metadb" ]; then
+    if [ -f "$APP_TP/geoip.metadb" ]; then
+        cp "$APP_TP/geoip.metadb" "$TP_DIR/geoip.metadb"
+        chmod 644 "$TP_DIR/geoip.metadb"
+        echo "已部署 geoip.metadb"
+    fi
+fi
+
+# 部署 geosite 数据（缺失时）
+if [ ! -f "$TP_DIR/geosite.dat" ]; then
+    if [ -f "$APP_TP/geosite.dat" ]; then
+        cp "$APP_TP/geosite.dat" "$TP_DIR/geosite.dat"
+        chmod 644 "$TP_DIR/geosite.dat"
+        echo "已部署 geosite.dat"
+    fi
+fi
 
 # 部署 tp.sh（若不存在或旧版）
 if [ ! -f "$TP_DIR/tp.sh" ] || ! grep -q "purge" "$TP_DIR/tp.sh" 2>/dev/null; then
@@ -28,12 +55,9 @@ if [ ! -f "$TP_DIR/gen_config.py" ] || ! grep -q "@appdata" "$TP_DIR/gen_config.
     fi
 fi
 
-# 检查 mihomo 是否就绪
-if [ ! -x "$TP_DIR/mihomo" ]; then
-    echo "⚠️ 未找到 mihomo 二进制，请从已有机器复制到 $TP_DIR/ 后即可使用"
-fi
+# 若没有代理配置，提示（可填订阅链接生成，或从已有机器复制）
 if [ ! -f "$TP_DIR/tp-config.yaml" ]; then
-    echo "⚠️ 未找到代理配置 tp-config.yaml，请从已有机器复制或在前台填写订阅链接"
+    echo "ℹ️ 尚未生成代理配置：可在前台「订阅设置」粘贴机场订阅链接，或从已有机器复制 tp-config.yaml"
 fi
 
 exit 0
