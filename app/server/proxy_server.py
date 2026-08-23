@@ -116,24 +116,35 @@ import re
 import time as _time
 
 # 订阅 userinfo 缓存：{url: (timestamp, {total/used/expire})}，避免频繁请求机场被限流
+# 成功数据保留 30 分钟；失败时保留旧数据兜底 + 60 秒内不重试打机场
 _userinfo_cache = {}
+_userinfo_fail_ts = {}   # url -> 最近失败时间
 _USERINFO_TTL = 1800  # 30 分钟（成功数据）
 _USERINFO_FAIL_TTL = 60  # 失败后 60 秒内不重试
 
 
 def fetch_userinfo(url):
-    """请求订阅 URL 响应头 subscription-userinfo，带缓存（成功 30 分钟 / 失败 60 秒）"""
+    """请求订阅 URL 响应头 subscription-userinfo，带缓存（成功 30 分钟 / 失败 60 秒不重试）"""
     now = _time.time()
-    if url in _userinfo_cache:
-        ts, data = _userinfo_cache[url]
-        ttl = _USERINFO_TTL if data is not None else _USERINFO_FAIL_TTL
-        if now - ts < ttl:
-            return data
+    # 失败后 60 秒内不重试，直接返回旧数据（或 None）
+    if url in _userinfo_fail_ts and now - _userinfo_fail_ts[url] < _USERINFO_FAIL_TTL:
+        return _userinfo_cache.get(url, (0, None))[1]
+    # 成功缓存 30 分钟内直接用
+    if url in _userinfo_cache and now - _userinfo_cache[url][0] < _USERINFO_TTL:
+        return _userinfo_cache[url][1]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "clash-verge/v2.0.0"})
-        # 空代理直连：绕过 mihomo 代理（机场对代理 IP 限流），直连反而更快
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        resp = opener.open(req, timeout=8)
+        # 先试空代理直连（对部分机场更快）；root 下直连可能被墙（透明代理不劫持 root）
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            resp = opener.open(req, timeout=6)
+        except Exception:
+            # 直连失败 → 改走 mihomo 本地代理（127.0.0.1:7890 mixed）
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({
+                "http": "http://127.0.0.1:7890",
+                "https": "http://127.0.0.1:7890",
+            }))
+            resp = opener.open(req, timeout=10)
         hdr = resp.headers.get("subscription-userinfo") or ""
         info = {}
         for part in hdr.split(";"):
@@ -148,10 +159,13 @@ def fetch_userinfo(url):
             "expire": int(info.get("expire") or 0),
         }
         _userinfo_cache[url] = (now, data)
+        _userinfo_fail_ts.pop(url, None)
         return data
     except Exception:
-        # 失败不缓存（下次再试），但记录失败时间避免连续打机场
-        _userinfo_cache[url] = (now, None)
+        # 失败：记录失败时间避免连续打机场，但保留旧数据兜底
+        _userinfo_fail_ts[url] = now
+        if url in _userinfo_cache:
+            return _userinfo_cache[url][1]
         return None
 
 
@@ -224,6 +238,7 @@ def refresh_provider(pname):
     """调用 mihomo 刷新指定 provider，返回 (ok, msg)"""
     # 刷新后清 userinfo 缓存，重新拉取最新流量
     _userinfo_cache.clear()
+    _userinfo_fail_ts.clear()
     try:
         req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname, method="PUT")
         resp = urllib.request.urlopen(req, timeout=30)
