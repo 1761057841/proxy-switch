@@ -98,6 +98,32 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .sub-btn { flex: 1; }
 .sub-clear { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .4); color: #fca5a5; }
 .sub-hint { margin-top: 8px; font-size: 11px; color: #64748b; line-height: 1.6; text-align: left; }
+.sub-item {
+  background: rgba(15, 23, 42, .5);
+  border: 1px solid rgba(148, 163, 184, .25);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.sub-item .sub-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.sub-item input[type=text] {
+  flex: 1; padding: 8px 10px;
+  background: rgba(15, 23, 42, .6);
+  border: 1px solid rgba(148, 163, 184, .35);
+  border-radius: 6px;
+  color: #e2e8f0; font-size: 13px;
+  outline: none;
+}
+.sub-item input[type=text]:focus { border-color: #38bdf8; }
+.sub-item .sub-name { flex: 0 0 30%; min-width: 90px; }
+.sub-item .sub-url { flex: 1; }
+.sub-item .sub-del {
+  background: rgba(239, 68, 68, .12); border: 1px solid rgba(239, 68, 68, .4);
+  color: #fca5a5; border-radius: 6px; padding: 0 12px;
+  cursor: pointer; font-size: 13px;
+}
+.sub-item .sub-del:hover { background: rgba(239, 68, 68, .25); }
+.sub-item:first-child .sub-del { visibility: hidden; }
 </style>
 </head>
 <body>
@@ -125,13 +151,14 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 
   <div class="config">
     <h2>📡 订阅设置（可选）</h2>
-    <input class="sub-input" id="subInput" type="url" placeholder="粘贴机场订阅链接 https://..." spellcheck="false">
+    <div id="subList"></div>
     <div class="btn-row">
+      <button class="test-btn sub-btn" id="subAddBtn" type="button">➕ 添加订阅</button>
       <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
-      <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除</button>
+      <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
     </div>
     <div class="msg" id="subMsg"></div>
-    <div class="sub-hint">填写后自动拉取机场最新节点（每小时更新）；留空则使用内置静态节点。保存后代理自动重启生效。</div>
+    <div class="sub-hint">支持多个机场订阅，每个可自定义名称；节点合并到同一策略组，每小时自动更新。保存后代理自动重启生效。</div>
   </div>
 
   <div class="hint">
@@ -200,20 +227,55 @@ async function testConfig() {
 
 document.getElementById('testBtn').addEventListener('click', testConfig);
 
-// ---- 订阅设置 ----
-const subInput = document.getElementById('subInput');
+// ---- 订阅设置（多订阅 + 自定义名称）----
+const subList = document.getElementById('subList');
 const subMsg = document.getElementById('subMsg');
+let subs = [];
 
 function setSubMsg(text, type) {
   subMsg.className = 'msg' + (type ? ' ' + type : '');
   subMsg.textContent = text || '';
 }
 
+function renderSubList() {
+  subList.innerHTML = '';
+  if (subs.length === 0) {
+    subList.innerHTML = '<div class="sub-hint" style="padding:6px 0">暂无订阅，点击「➕ 添加订阅」填入机场链接（可多个）。</div>';
+    return;
+  }
+  subs.forEach((s, i) => {
+    const item = document.createElement('div');
+    item.className = 'sub-item';
+    item.innerHTML =
+      '<div class="sub-row">' +
+        '<input type="text" class="sub-name" placeholder="名称（如：机场A）" value="' + esc(s.name || '') + '">' +
+        '<input type="text" class="sub-url" placeholder="订阅链接 https://..." value="' + esc(s.url || '') + '">' +
+        '<button class="sub-del" type="button" title="删除此订阅">✕</button>' +
+      '</div>';
+    const nameInput = item.querySelector('.sub-name');
+    const urlInput = item.querySelector('.sub-url');
+    nameInput.addEventListener('input', () => { s.name = nameInput.value.trim(); });
+    urlInput.addEventListener('input', () => { s.url = urlInput.value.trim(); });
+    item.querySelector('.sub-del').addEventListener('click', () => {
+      subs.splice(i, 1);
+      renderSubList();
+    });
+    subList.appendChild(item);
+  });
+}
+
+function esc(v) {
+  return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function loadSub() {
   try {
     const res = await fetch(API + '/api/subscription');
     const data = await res.json();
-    if (data.subscription) subInput.value = data.subscription;
+    if (Array.isArray(data.subscriptions)) {
+      subs = data.subscriptions.map(s => ({ name: s.name || '', url: s.url || '' }));
+    }
+    renderSubList();
   } catch (e) {}
 }
 
@@ -222,15 +284,22 @@ async function saveSub() {
   btn.disabled = true;
   setSubMsg('⏳ 正在保存并重启代理…', 'info');
   try {
+    // 过滤空行，补默认名称
+    const list = subs.filter(s => s.url && s.url.trim());
+    const payload = list.map((s, i) => ({ name: (s.name || '').trim() || ('订阅' + (i + 1)), url: s.url.trim() }));
     const res = await fetch(API + '/api/subscription', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: subInput.value.trim() })
+      body: JSON.stringify({ subscriptions: payload })
     });
     let data = {};
     try { data = await res.json(); } catch (e) {}
     if (data.ok) {
       setSubMsg('✅ ' + (data.msg || '已保存'), 'ok');
+      if (Array.isArray(data.subscriptions)) {
+        subs = data.subscriptions.map(s => ({ name: s.name || '', url: s.url || '' }));
+        renderSubList();
+      }
       render(data.enabled, data.proxy);
     } else {
       setSubMsg('❌ ' + (data.error || '保存失败'), 'err');
@@ -241,9 +310,16 @@ async function saveSub() {
   btn.disabled = false;
 }
 
+document.getElementById('subAddBtn').addEventListener('click', () => {
+  subs.push({ name: '', url: '' });
+  renderSubList();
+  const last = subList.lastElementChild;
+  if (last) last.querySelector('.sub-url').focus();
+});
 document.getElementById('subSaveBtn').addEventListener('click', saveSub);
 document.getElementById('subClearBtn').addEventListener('click', () => {
-  subInput.value = '';
+  subs = [];
+  renderSubList();
   saveSub();
 });
 

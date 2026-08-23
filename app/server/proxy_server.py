@@ -46,7 +46,7 @@ MIHOMO_API = "http://127.0.0.1:9090"
 TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/tp.sh")
 GEN_SCRIPT = os.environ.get("GEN_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/gen_config.py")
 
-_state = {"enabled": False, "subscription": ""}
+_state = {"enabled": False, "subscriptions": []}
 
 
 def load_state():
@@ -55,9 +55,20 @@ def load_state():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             _state = json.load(f)
     except Exception:
-        _state = {"enabled": False, "subscription": ""}
+        _state = {"enabled": False, "subscriptions": []}
     _state.setdefault("enabled", False)
-    _state.setdefault("subscription", "")
+    # 多订阅支持：优先 subscriptions 数组，兼容旧 subscription 字符串
+    if "subscriptions" not in _state:
+        _state["subscriptions"] = []
+    if not isinstance(_state["subscriptions"], list):
+        _state["subscriptions"] = []
+    old = _state.get("subscription") or ""
+    if old and not _state["subscriptions"]:
+        _state["subscriptions"] = [{"name": "订阅1", "url": old}]
+    if not _state["subscriptions"]:
+        _state["subscription"] = ""
+    else:
+        _state["subscription"] = _state["subscriptions"][0]["url"]
 
 
 def save_state():
@@ -69,7 +80,25 @@ def save_state():
 
 
 def get_subscription():
+    """兼容旧接口：返回第一个订阅 URL 或空"""
+    subs = _state.get("subscriptions") or []
+    if subs:
+        return subs[0].get("url", "") if isinstance(subs[0], dict) else str(subs[0])
     return _state.get("subscription", "")
+
+
+def get_subscriptions():
+    """返回订阅列表 [{"name":..., "url":...}]"""
+    out = []
+    for s in _state.get("subscriptions") or []:
+        if isinstance(s, dict):
+            url = (s.get("url") or "").strip()
+            if url:
+                out.append({"name": (s.get("name") or "").strip() or "订阅%d" % (len(out) + 1),
+                             "url": url})
+        elif isinstance(s, str) and s.strip():
+            out.append({"name": "订阅%d" % (len(out) + 1), "url": s.strip()})
+    return out
 
 
 def run_tp(action):
@@ -153,10 +182,10 @@ class AdminHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "enabled": bool(_state.get("enabled")),
                 "proxy": "mihomo 透明代理",
-                "subscription": get_subscription(),
+                "subscriptions": get_subscriptions(),
             })
         elif path == "/api/subscription":
-            self.send_json({"ok": True, "subscription": get_subscription()})
+            self.send_json({"ok": True, "subscriptions": get_subscriptions()})
         elif path.startswith("/metacubexd"):
             self.serve_metacubexd(path)
         elif path in ("/", "/index.html"):
@@ -170,10 +199,14 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.proxy_mihomo()
         elif path == "/api/proxy/on":
             # 先确保配置已生成（有订阅拉取 / 无订阅静态），再启动
-            sub = (get_subscription() or "").strip()
-            args = ["python3", GEN_SCRIPT, sub] if sub else ["python3", GEN_SCRIPT, "--clear"]
+            subs = get_subscriptions()
+            if subs:
+                # 生成多订阅配置：写入临时 state 供 gen_config 读取
+                args = ["python3", GEN_SCRIPT]
+            else:
+                args = ["python3", GEN_SCRIPT, "--clear"]
             try:
-                g = subprocess.run(args, capture_output=True, text=True, timeout=30)
+                g = subprocess.run(args, capture_output=True, text=True, timeout=60)
                 if g.returncode != 0:
                     self.send_json({"enabled": False, "proxy": "", "error": (g.stderr or g.stdout or "生成配置失败").strip()})
                     return
@@ -199,7 +232,7 @@ class AdminHandler(BaseHTTPRequestHandler):
                 "ok": True,
                 "enabled": bool(_state.get("enabled")),
                 "proxy": "mihomo 透明代理",
-                "subscription": get_subscription(),
+                "subscriptions": get_subscriptions(),
             })
         elif path == "/api/test":
             self.send_json(test_proxy_connectivity())
@@ -312,7 +345,11 @@ class AdminHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def handle_subscription(self):
-        """保存订阅链接 → 重新生成配置 → 重启代理"""
+        """保存订阅列表 → 重新生成配置 → 重启代理
+        支持格式：
+            {"subscriptions": [{"name": "机场A", "url": "https://..."}, ...]}
+            {"subscription": "https://..."}（兼容旧版单订阅）
+        """
         try:
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length).decode("utf-8") if length else ""
@@ -320,13 +357,35 @@ class AdminHandler(BaseHTTPRequestHandler):
                 body = json.loads(raw) if raw.strip() else {}
             except Exception:
                 body = {}
-            sub = (body.get("subscription") or "").strip()
-            _state["subscription"] = sub
-            save_state()
+
+            if "subscriptions" in body and isinstance(body["subscriptions"], list):
+                new_subs = []
+                for i, s in enumerate(body["subscriptions"]):
+                    if isinstance(s, dict):
+                        url = (s.get("url") or "").strip()
+                        if url:
+                            new_subs.append({"name": (s.get("name") or "").strip() or "订阅%d" % (i + 1),
+                                             "url": url})
+                    elif isinstance(s, str) and s.strip():
+                        new_subs.append({"name": "订阅%d" % (i + 1), "url": s.strip()})
+                _state["subscriptions"] = new_subs
+                _state["subscription"] = new_subs[0]["url"] if new_subs else ""
+                save_state()
+            else:
+                # 兼容旧版单订阅
+                sub = (body.get("subscription") or "").strip()
+                if sub:
+                    _state["subscriptions"] = [{"name": "订阅1", "url": sub}]
+                else:
+                    _state["subscriptions"] = []
+                _state["subscription"] = sub
+                save_state()
+
+            subs = get_subscriptions()
             # 重新生成配置
-            if sub:
-                p = subprocess.run(["python3", GEN_SCRIPT, sub],
-                                   capture_output=True, text=True, timeout=30)
+            if subs:
+                p = subprocess.run(["python3", GEN_SCRIPT],
+                                   capture_output=True, text=True, timeout=60)
             else:
                 p = subprocess.run(["python3", GEN_SCRIPT, "--clear"],
                                    capture_output=True, text=True, timeout=30)
@@ -339,11 +398,11 @@ class AdminHandler(BaseHTTPRequestHandler):
             enabled, _ = tp_status()
             _state["enabled"] = enabled
             save_state()
-            mode = "订阅模式" if sub else "静态节点模式"
+            mode = "订阅模式(%d)" % len(subs) if subs else "静态节点模式"
             self.send_json({
                 "ok": True,
                 "enabled": enabled,
-                "subscription": sub,
+                "subscriptions": subs,
                 "msg": "%s，代理已重启生效" % mode,
             })
         except Exception as e:

@@ -1,6 +1,18 @@
 # Changelog
 
+## v2.8.0 (2026-08-23)
+
+**新功能**
+- 支持多订阅：可同时配置多个机场订阅，节点合并到同一策略组（PROXY / 自动选择 / 故障转移）
+- 每个订阅支持自定义名称（如「主力机场」「备用机场」），方便区分管理
+
+**技术细节**
+- state.json 升级为 subscriptions 数组（兼容旧版单 subscription 字段，自动迁移）
+- gen_config.py 循环生成 airport1..N provider，PROXY 组 use 合并全部
+- 前端订阅区改为列表式管理：添加 / 删除 / 重命名
+
 ## v2.7.3 (2026-08-23)
+
 
 **修复**
 - 应用中心停用应用时，透明代理残留（mihomo/iptables/DNS 未清理）：cmd/main stop 现在会调用 tp.sh stop 彻底停止代理
