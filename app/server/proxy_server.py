@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-proxy-switch 应用主程序 —— NAS 全局代理开关
+proxy-switch 应用主程序 —— NAS 透明代理开关（v2.0）
 
 功能：
-1. 管理页面填写代理服务器地址（IP:端口，可选认证）
-2. 开启：以 root 写入系统全局代理配置，整个 NAS 新启动的进程走代理
-   - /etc/environment
-   - /etc/profile.d/proxy-switch.sh
-   - /etc/systemd/system.conf.d/10-proxy-switch.conf（systemd 全局环境，重启服务后生效）
-3. 关闭：精确移除上述配置，恢复直连
-4. 状态持久化到 STATE_FILE（TRIM_PKGVAR 下），应用重启后恢复
+1. 管理页面开关：开启 = 启动 mihomo 透明代理 + iptables 规则 + DNS 指向本机（实时生效）
+                    关闭 = 删除 iptables 规则 + 恢复 DNS + 停止 mihomo（立即直连）
+2. 状态持久化到 STATE_FILE
+3. 测试连接：通过代理访问外网验证
+
+透明代理原理（与 Clash TUN 同级别，Chrome/任何程序无需配置）：
+   应用流量 → iptables REDIRECT → mihomo(redir 7893 + dns 53) → 机场节点
+
+依赖（部署在 NAS 上）：
+   - /vol1/1000/transparent-proxy/tp.sh   开关脚本
+   - /vol1/1000/transparent-proxy/mihomo  二进制
+   - /vol1/1000/transparent-proxy/tp-config.yaml  配置（含节点）
 
 环境变量：
 - SOCKET_PATH  统一网关 Unix Socket 路径（由 cmd/main 传入 ${TRIM_APPDEST}/app.sock）
@@ -20,35 +25,20 @@ proxy-switch 应用主程序 —— NAS 全局代理开关
 import json
 import os
 import socket
+import subprocess
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingUnixStreamServer
 
 SOCKET_PATH = os.environ.get("SOCKET_PATH", "/tmp/proxy-switch.sock")
 STATE_FILE = os.environ.get("STATE_FILE", "/tmp/proxy-switch-state.json")
 WWW_DIR = os.environ.get("WWW_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "www"))
-# fnOS 统一网关前缀：网关转发时保留完整路径（/app/proxy-switch/...），
-# 应用需自行剥离后再匹配路由
 GATEWAY_PREFIX = os.environ.get("GATEWAY_PREFIX", "/app/proxy-switch")
 
-# 系统代理配置文件（需 root）
-ENV_FILE = "/etc/environment"
-PROFILE_SH = "/etc/profile.d/proxy-switch.sh"
-SYSTEMD_CONF = "/etc/systemd/system.conf.d/10-proxy-switch.conf"
+# 透明代理脚本
+TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/1000/transparent-proxy/tp.sh")
 
-# 内网直连白名单（NO_PROXY），避免代理影响局域网访问
-NO_PROXY_DEFAULT = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local"
+_state = {"enabled": False}
 
-_lock = None
-try:
-    import threading
-    _lock = threading.Lock()
-except Exception:
-    pass
-
-_state = {"enabled": False, "proxy": "", "auth_user": "", "auth_pass": ""}
-
-
-# ---------------------------------------------------------------- 状态持久化
 
 def load_state():
     global _state
@@ -56,11 +46,8 @@ def load_state():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             _state = json.load(f)
     except Exception:
-        _state = {"enabled": False, "proxy": "", "auth_user": "", "auth_pass": ""}
+        _state = {"enabled": False}
     _state.setdefault("enabled", False)
-    _state.setdefault("proxy", "")
-    _state.setdefault("auth_user", "")
-    _state.setdefault("auth_pass", "")
 
 
 def save_state():
@@ -71,178 +58,42 @@ def save_state():
         pass
 
 
-def proxy_url():
-    """拼出代理 URL：http://[user:pass@]host:port"""
-    proxy = (_state.get("proxy") or "").strip()
-    if not proxy:
-        return ""
-    auth = ""
-    if _state.get("auth_user"):
-        import urllib.parse
-        user = urllib.parse.quote(_state.get("auth_user", ""), safe="")
-        pw = urllib.parse.quote(_state.get("auth_pass", ""), safe="")
-        auth = "%s:%s@" % (user, pw)
-    return "http://%s%s" % (auth, proxy)
-
-
-# ---------------------------------------------------------------- 系统代理配置
-
-def _env_lines(prefix):
-    url = proxy_url()
-    lines = []
-    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-                 "http_proxy", "https_proxy", "all_proxy"):
-        lines.append("%s%s=%s" % (prefix, name, url))
-    lines.append("%sNO_PROXY=%s" % (prefix, NO_PROXY_DEFAULT))
-    lines.append("%sno_proxy=%s" % (prefix, NO_PROXY_DEFAULT))
-    return lines
-
-
-def _marker_lines():
-    return ["# BEGIN proxy-switch (managed by proxy-switch app, do not edit)",
-            "# END proxy-switch"]
-
-
-def _write_environment():
-    """写 /etc/environment：保留原有内容，用标记块替换代理配置。"""
-    content = ""
+def run_tp(action):
+    """调用 tp.sh，返回 (ok, output)"""
     try:
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        pass
-    lines = content.splitlines()
-
-    # 删除旧的标记块
-    out = []
-    skip = False
-    for ln in lines:
-        if ln.strip() == "# BEGIN proxy-switch (managed by proxy-switch app, do not edit)":
-            skip = True
-            continue
-        if ln.strip() == "# END proxy-switch":
-            skip = False
-            continue
-        if not skip:
-            out.append(ln)
-    # 去掉末尾空行
-    while out and out[-1].strip() == "":
-        out.pop()
-
-    out += [""] + ["# BEGIN proxy-switch (managed by proxy-switch app, do not edit)"] \
-          + _env_lines("") \
-          + ["# END proxy-switch"]
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + "\n")
+        p = subprocess.run(["bash", TP_SCRIPT, action],
+                           capture_output=True, text=True, timeout=30)
+        return p.returncode == 0, (p.stdout or p.stderr or "").strip()
+    except Exception as e:
+        return False, str(e)
 
 
-def _remove_environment():
-    """移除 /etc/environment 中的代理标记块。"""
+def tp_status():
+    """解析 tp.sh status 输出，判断代理是否开启"""
     try:
-        with open(ENV_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
+        p = subprocess.run(["bash", TP_SCRIPT, "status"],
+                           capture_output=True, text=True, timeout=15)
+        out = (p.stdout or "") + (p.stderr or "")
+        enabled = "mihomo 运行中" in out and "TP_OUT" in out
+        return enabled, out
     except Exception:
-        return
-    lines = content.splitlines()
-    out = []
-    skip = False
-    for ln in lines:
-        if ln.strip() == "# BEGIN proxy-switch (managed by proxy-switch app, do not edit)":
-            skip = True
-            continue
-        if ln.strip() == "# END proxy-switch":
-            skip = False
-            continue
-        if not skip:
-            out.append(ln)
-    while out and out[-1].strip() == "":
-        out.pop()
-    with open(ENV_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(out) + ("\n" if out else ""))
-
-
-def _write_profile_sh():
-    """写 /etc/profile.d/proxy-switch.sh（登录 shell 生效）。"""
-    body = _env_lines("export ")
-    with open(PROFILE_SH, "w", encoding="utf-8") as f:
-        f.write("\n".join(body) + "\n")
-
-
-def _remove_profile_sh():
-    try:
-        os.remove(PROFILE_SH)
-    except Exception:
-        pass
-
-
-def _write_systemd_conf():
-    """写 systemd 全局环境：影响之后启动的 systemd 服务（含 Docker 等）。"""
-    url = proxy_url()
-    lines = ["[Manager]", "DefaultEnvironment="]
-    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-                 "http_proxy", "https_proxy", "all_proxy"):
-        lines.append('    "%s=%s"' % (name, url))
-    lines.append('    "NO_PROXY=%s"' % NO_PROXY_DEFAULT)
-    lines.append('    "no_proxy=%s"' % NO_PROXY_DEFAULT)
-    try:
-        os.makedirs(os.path.dirname(SYSTEMD_CONF), exist_ok=True)
-        with open(SYSTEMD_CONF, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
-        os.system("systemctl daemon-reload >/dev/null 2>&1")
-    except Exception:
-        pass
-
-
-def _remove_systemd_conf():
-    try:
-        os.remove(SYSTEMD_CONF)
-        os.system("systemctl daemon-reload >/dev/null 2>&1")
-    except Exception:
-        pass
-
-
-def apply_proxy():
-    """开启：写入全部系统代理配置。"""
-    _write_environment()
-    _write_profile_sh()
-    _write_systemd_conf()
-    _state["enabled"] = True
-    save_state()
-
-
-def remove_proxy():
-    """关闭：移除全部系统代理配置。"""
-    _remove_environment()
-    _remove_profile_sh()
-    _remove_systemd_conf()
-    _state["enabled"] = False
-    save_state()
+        return False, ""
 
 
 # ---------------------------------------------------------------- 代理连通性测试
 
-def test_proxy_connectivity(proxy, user="", pw=""):
-    """通过指定代理访问外网测试 URL，验证代理是否可用。
-    返回 {"ok": bool, "via": 测试点, "latency_ms": 耗时, "detail": 描述, "error": 失败原因}
-    """
+def test_proxy_connectivity(proxy="", user="", pw=""):
+    """通过 mihomo 的 7890 混合端口测试外网连通性（透明代理模式下本机 7890 即代理出口）"""
     import time
-    import urllib.parse
     import urllib.request
 
-    proxy = (proxy or "").strip()
-    if not proxy:
-        return {"ok": False, "error": "请先填写代理服务器地址"}
-    proxy_url = "http://" + proxy
-    if user:
-        u = urllib.parse.quote(user, safe="")
-        p = urllib.parse.quote(pw, safe="")
-        proxy_url = "http://%s:%s@%s" % (u, p, proxy)
+    # 透明代理模式下，用本机 7890 作为显式代理测试（mihomo 出口）
+    proxy_url = "http://127.0.0.1:7890"
     handler = urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})
     opener = urllib.request.build_opener(handler)
     targets = [
         ("https://www.gstatic.com/generate_204", "GStatic"),
         ("https://cp.cloudflare.com/generate_204", "Cloudflare"),
-        ("http://www.gstatic.com/generate_204", "GStatic-HTTP"),
     ]
     last_err = ""
     for url, name in targets:
@@ -275,10 +126,12 @@ class AdminHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.route_path()
         if path == "/api/status":
+            enabled, _ = tp_status()
+            _state["enabled"] = enabled
+            save_state()
             self.send_json({
-                "enabled": bool(_state.get("enabled")),
-                "proxy": _state.get("proxy", ""),
-                "hasAuth": bool(_state.get("auth_user")),
+                "enabled": enabled,
+                "proxy": "mihomo 透明代理",
             })
         elif path in ("/", "/index.html"):
             self.serve_file("index.html", "text/html; charset=utf-8")
@@ -288,46 +141,24 @@ class AdminHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = self.route_path()
         if path == "/api/proxy/on":
-            apply_proxy()
-            self.send_json({"enabled": True, "proxy": _state.get("proxy", "")})
+            ok, out = run_tp("start")
+            enabled, _ = tp_status()
+            _state["enabled"] = enabled
+            save_state()
+            if ok and enabled:
+                self.send_json({"enabled": True, "proxy": "mihomo 透明代理", "msg": out})
+            else:
+                self.send_json({"enabled": False, "proxy": "", "error": out or "启动失败"})
         elif path == "/api/proxy/off":
-            remove_proxy()
-            self.send_json({"enabled": False, "proxy": ""})
+            ok, out = run_tp("stop")
+            _state["enabled"] = False
+            save_state()
+            self.send_json({"enabled": False, "proxy": "", "msg": out or "已关闭"})
         elif path == "/api/config":
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(length) if length else b"{}"
-                cfg = json.loads(body.decode("utf-8"))
-                proxy = (cfg.get("proxy") or "").strip()
-                # 校验格式 host:port
-                if proxy:
-                    host, _, port = proxy.rpartition(":")
-                    if not host or not port:
-                        raise ValueError("bad proxy")
-                    port = int(port)
-                    if not (1 <= port <= 65535):
-                        raise ValueError("bad port")
-                _state["proxy"] = proxy
-                _state["auth_user"] = (cfg.get("auth_user") or "").strip()
-                _state["auth_pass"] = cfg.get("auth_pass") or ""
-                save_state()
-                # 若代理正在开启状态，立即应用新配置
-                if _state.get("enabled"):
-                    apply_proxy()
-                self.send_json({"ok": True, "enabled": bool(_state.get("enabled")), "proxy": proxy})
-            except Exception:
-                self.send_json({"ok": False, "error": "代理地址格式应为 IP:端口，如 192.168.1.100:7890"})
+            # 兼容旧版：透明代理模式下配置由 tp-config.yaml 管理，这里仅返回 ok
+            self.send_json({"ok": True, "enabled": bool(_state.get("enabled")), "proxy": "mihomo 透明代理"})
         elif path == "/api/test":
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(length) if length else b"{}"
-                cfg = json.loads(body.decode("utf-8")) if body.strip() else {}
-                proxy = (cfg.get("proxy") or "").strip() or _state.get("proxy", "")
-                user = (cfg.get("auth_user") or "").strip() or _state.get("auth_user", "")
-                pw = cfg.get("auth_pass") or _state.get("auth_pass", "")
-                self.send_json(test_proxy_connectivity(proxy, user, pw))
-            except Exception:
-                self.send_json({"ok": False, "error": "测试失败，请检查输入"})
+            self.send_json(test_proxy_connectivity())
         else:
             self.send_error(404)
 

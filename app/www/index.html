@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NAS 全局代理</title>
+<title>NAS 透明代理</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -67,39 +67,17 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   text-align: left;
 }
 .config h2 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
-.field { margin-bottom: 12px; }
-.field label {
-  display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px;
-}
-.field input {
-  width: 100%; padding: 9px 12px;
-  background: rgba(15, 23, 42, .6);
-  border: 1px solid rgba(148, 163, 184, .3);
-  border-radius: 8px;
-  color: #e2e8f0; font-size: 14px;
-  font-family: ui-monospace, Consolas, "Courier New", monospace;
-  outline: none;
-}
-.field input:focus { border-color: #38bdf8; }
-.field .tip { font-size: 11px; color: #64748b; margin-top: 4px; }
 .btn-row { display: flex; gap: 10px; margin-top: 6px; }
-.save-btn {
-  flex: 1; padding: 10px;
-  background: linear-gradient(135deg, #0ea5e9, #2563eb);
-  border: none; border-radius: 8px;
-  color: #fff; font-size: 14px; font-weight: 600;
-  cursor: pointer; transition: opacity .2s;
-}
 .test-btn {
-  flex: 0 0 auto; padding: 10px 16px;
+  flex: 1; padding: 10px;
   background: rgba(148, 163, 184, .15);
   border: 1px solid rgba(148, 163, 184, .4);
   border-radius: 8px;
   color: #cbd5e1; font-size: 14px; font-weight: 600;
   cursor: pointer; transition: opacity .2s;
 }
-.save-btn:hover, .test-btn:hover { opacity: .85; }
-.save-btn:disabled, .test-btn:disabled { opacity: .5; cursor: not-allowed; }
+.test-btn:hover { opacity: .85; }
+.test-btn:disabled { opacity: .5; cursor: not-allowed; }
 .msg { text-align: center; font-size: 13px; margin-top: 10px; min-height: 18px; line-height: 1.5; }
 .msg.ok { color: #4ade80; }
 .msg.err { color: #f87171; }
@@ -110,8 +88,8 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 </head>
 <body>
 <div class="card">
-  <h1>🌐 NAS 全局代理</h1>
-  <p class="sub">填写代理服务器 · 整个 NAS 上网走代理</p>
+  <h1>🌐 NAS 透明代理</h1>
+  <p class="sub">一键开关 · 全机实时生效（Chrome / 下载 / Docker）</p>
   <div class="status-row">
     <span class="dot" id="dot"></span>
     <span id="statusText">加载中…</span>
@@ -123,22 +101,8 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   </label>
 
   <div class="config">
-    <h2>⚙️ 代理服务器</h2>
-    <div class="field">
-      <label for="cfgProxy">代理服务器地址（IP:端口）</label>
-      <input type="text" id="cfgProxy" placeholder="如 192.168.1.100:7890">
-      <div class="tip">HTTP 代理格式，Clash / 机场代理常用</div>
-    </div>
-    <div class="field">
-      <label for="cfgUser">用户名（可选）</label>
-      <input type="text" id="cfgUser" placeholder="需要认证才填">
-    </div>
-    <div class="field">
-      <label for="cfgPass">密码（可选）</label>
-      <input type="password" id="cfgPass" placeholder="需要认证才填">
-    </div>
+    <h2>⚙️ 代理状态</h2>
     <div class="btn-row">
-      <button class="save-btn" id="saveBtn" type="button">保存</button>
       <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
     </div>
     <div class="msg" id="msg"></div>
@@ -146,10 +110,10 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 
   <div class="hint">
     <b>说明：</b><br>
-    · 保存后点「测试连接」可验证代理服务器是否可达<br>
-    · 开启后 NAS <b>新启动</b>的程序走代理（curl、下载、Docker 拉镜像等）；已运行的服务需重启才生效<br>
-    · ⚠️ 本应用只是「开关」：它控制 NAS 程序是否走代理，<b>不会启动/停止代理服务器本身</b>（如 mihomo/Clash 是独立应用，需在应用中心单独停止）<br>
-    · 内网地址（192.168.x / 10.x / 172.16-31.x 等）自动直连，不受代理影响
+    · 开启 = 全机流量实时走代理（网络层劫持，Chrome 无需任何设置，已开的页面刷新即生效）<br>
+    · 关闭 = 立即恢复直连<br>
+    · 节点在 <code>/vol1/1000/transparent-proxy/tp-config.yaml</code> 中维护<br>
+    · 内网地址（192.168.x / 10.x 等）自动直连，不受影响
   </div>
 </div>
 <script>
@@ -161,7 +125,6 @@ async function refresh() {
     const res = await fetch(API + '/api/status');
     const data = await res.json();
     render(data.enabled, data.proxy);
-    document.getElementById('cfgProxy').value = data.proxy || '';
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
@@ -172,15 +135,10 @@ function render(enabled, proxy) {
   const text = document.getElementById('statusText');
   const addr = document.getElementById('addr');
   dot.className = 'dot ' + (enabled ? 'on' : 'off');
-  text.textContent = enabled ? '代理已开启' : '代理已关闭';
-  if (proxy) {
-    if (enabled) {
-      addr.textContent = '通过 ' + proxy;
-      addr.className = 'addr';
-    } else {
-      addr.textContent = proxy + '（未开启）';
-      addr.className = 'addr saved';
-    }
+  text.textContent = enabled ? '代理已开启（全机走代理）' : '代理已关闭（直连）';
+  if (enabled) {
+    addr.textContent = '透明代理运行中';
+    addr.className = 'addr';
   } else {
     addr.textContent = '—';
     addr.className = 'addr empty';
@@ -194,53 +152,12 @@ function setMsg(text, type) {
   msg.textContent = text || '';
 }
 
-async function saveConfig() {
-  const btn = document.getElementById('saveBtn');
-  btn.disabled = true;
-  setMsg('保存中…');
-  try {
-    const res = await fetch(API + '/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proxy: document.getElementById('cfgProxy').value.trim(),
-        auth_user: document.getElementById('cfgUser').value.trim(),
-        auth_pass: document.getElementById('cfgPass').value
-      })
-    });
-    let data = {};
-    try { data = await res.json(); } catch (e) { /* 网关可能返回非 JSON */ }
-    if (data.ok) {
-      setMsg('✅ 已保存：' + data.proxy + (data.enabled ? '（代理运行中）' : '（未开启，拨动开关生效）'), 'ok');
-      await refresh();
-    } else {
-      setMsg('❌ ' + (data.error || '保存失败'), 'err');
-    }
-  } catch (err) {
-    setMsg('❌ 无法连接服务', 'err');
-  }
-  btn.disabled = false;
-}
-
 async function testConfig() {
   const btn = document.getElementById('testBtn');
-  const proxy = document.getElementById('cfgProxy').value.trim();
-  if (!proxy) {
-    setMsg('❌ 请先填写代理服务器地址', 'err');
-    return;
-  }
   btn.disabled = true;
   setMsg('🔍 测试中，请稍候…（最长约 10 秒）', 'info');
   try {
-    const res = await fetch(API + '/api/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        proxy: proxy,
-        auth_user: document.getElementById('cfgUser').value.trim(),
-        auth_pass: document.getElementById('cfgPass').value
-      })
-    });
+    const res = await fetch(API + '/api/test', { method: 'POST' });
     let data = {};
     try { data = await res.json(); } catch (e) {}
     if (data.ok) {
@@ -254,26 +171,28 @@ async function testConfig() {
   btn.disabled = false;
 }
 
-document.getElementById('saveBtn').addEventListener('click', saveConfig);
 document.getElementById('testBtn').addEventListener('click', testConfig);
 
 document.getElementById('toggle').addEventListener('change', async (e) => {
   if (busy) { e.target.checked = !e.target.checked; return; }
   busy = true;
   const on = e.target.checked;
-  if (on && !document.getElementById('cfgProxy').value.trim()) {
-    setMsg('❌ 请先填写代理服务器地址', 'err');
-    e.target.checked = false;
-    busy = false;
-    return;
-  }
+  setMsg(on ? '⏳ 正在开启代理…' : '⏳ 正在关闭代理…', 'info');
   try {
     const res = await fetch(API + (on ? '/api/proxy/on' : '/api/proxy/off'), { method: 'POST' });
     let data = {};
     try { data = await res.json(); } catch (e) {}
-    render(data.enabled, data.proxy !== undefined ? data.proxy : document.getElementById('cfgProxy').value);
-    if (data.enabled) setMsg('✅ 代理已开启', 'ok');
-    else if (!data.enabled && on === false) setMsg('代理已关闭', 'info');
+    if (on) {
+      if (data.enabled) {
+        setMsg('✅ 代理已开启，全机生效', 'ok');
+      } else {
+        setMsg('❌ 开启失败：' + (data.error || '未知错误'), 'err');
+        e.target.checked = false;
+      }
+    } else {
+      setMsg('代理已关闭，恢复直连', 'info');
+    }
+    render(data.enabled !== undefined ? data.enabled : !on, data.proxy);
   } catch (err) {
     e.target.checked = !on;
     setMsg('❌ 无法连接服务', 'err');

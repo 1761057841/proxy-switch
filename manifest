@@ -1,7 +1,7 @@
 appname=proxy-switch
-version=1.1.0
-display_name=NAS全局代理
-desc=填写代理服务器地址（IP:端口），开启后整个 NAS 上网走代理；关闭恢复直连。支持可选认证，内网地址自动直连。
+version=2.0.0
+display_name=NAS透明代理
+desc=一键开启/关闭 NAS 全局透明代理（mihomo + iptables），全机实时生效；关闭立即直连，卸载自动清理。
 source=thirdparty
 platform=all
 maintainer=fnOS-Dev
