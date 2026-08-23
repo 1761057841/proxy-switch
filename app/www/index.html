@@ -98,10 +98,17 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .sub-btn { flex: 1; }
 .sub-clear { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .4); color: #fca5a5; }
 .sub-hint { margin-top: 8px; font-size: 11px; color: #64748b; line-height: 1.6; text-align: left; }
+.panel-card { width: min(1200px, 96vw); max-width: 96vw; padding: 20px; }
+.panel-head {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+}
+.back-btn { flex: 0 0 auto; width: auto; padding: 8px 16px; }
+.panel-title { font-size: 16px; font-weight: 600; color: #e2e8f0; }
+#panelFrame { background: #0b1220; }
 </style>
 </head>
 <body>
-<div class="card">
+<div class="card" id="mainView">
   <h1>🌐 NAS 透明代理</h1>
   <p class="sub">一键开关 · 全机实时生效（Chrome / 下载 / Docker）</p>
   <div class="status-row">
@@ -118,6 +125,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     <h2>⚙️ 代理状态</h2>
     <div class="btn-row">
       <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
+      <button class="test-btn" id="panelBtn" type="button" onclick="openPanel()">📊 节点面板</button>
     </div>
     <div class="msg" id="msg"></div>
   </div>
@@ -141,9 +149,31 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     · 内网地址（192.168.x / 10.x 等）自动直连，不受影响
   </div>
 </div>
+
+<!-- 节点面板视图（内嵌） -->
+<div class="card panel-card" id="panelView" style="display:none">
+  <div class="panel-head">
+    <button class="test-btn back-btn" id="backBtn" type="button" onclick="closePanel()">← 返回开关</button>
+    <span class="panel-title">📊 节点面板</span>
+  </div>
+  <iframe id="panelFrame" src="" style="width:100%;height:70vh;min-height:480px;border:0;border-radius:12px;background:#0b1220;"></iframe>
+</div>
 <script>
 const API = '/app/proxy-switch';
 let busy = false;
+
+function openPanel() {
+  document.getElementById('mainView').style.display = 'none';
+  const pv = document.getElementById('panelView');
+  pv.style.display = 'block';
+  const frame = document.getElementById('panelFrame');
+  if (!frame.src) frame.src = API + '/metacubexd/';
+}
+
+function closePanel() {
+  document.getElementById('panelView').style.display = 'none';
+  document.getElementById('mainView').style.display = 'block';
+}
 
 async function refresh() {
   try {

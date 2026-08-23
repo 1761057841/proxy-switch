@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-proxy-switch 应用主程序 —— NAS 透明代理开关（v2.1）
+proxy-switch 应用主程序 —— NAS 透明代理开关（v2.6）
 
 功能：
 1. 管理页面开关：开启 = 启动 mihomo 透明代理 + iptables 规则 + DNS 指向本机（实时生效）
@@ -9,6 +9,7 @@ proxy-switch 应用主程序 —— NAS 透明代理开关（v2.1）
 2. 订阅链接管理：保存订阅 URL → 生成 proxy-providers 配置 → 重启代理生效
 3. 状态持久化到 STATE_FILE
 4. 测试连接：通过代理访问外网验证
+5. MetaCubeXD 面板：静态页面 + /api/mihomo/* 代理到 mihomo external-controller(9090)
 
 透明代理原理（与 Clash TUN 同级别，Chrome/任何程序无需配置）：
    应用流量 → iptables REDIRECT → mihomo(redir 7893 + dns 53) → 机场节点
@@ -23,11 +24,13 @@ proxy-switch 应用主程序 —— NAS 透明代理开关（v2.1）
 - SOCKET_PATH  统一网关 Unix Socket 路径（由 cmd/main 传入 ${TRIM_APPDEST}/app.sock）
 - STATE_FILE   状态文件路径（由 cmd/main 传入 ${TRIM_PKGVAR}/state.json）
 - WWW_DIR      前端静态页面目录（由 cmd/main 传入 ${TRIM_APPDEST}/www）
+- GATEWAY_PREFIX 网关前缀（默认 /app/proxy-switch）
 """
 import json
 import os
 import socket
 import subprocess
+import urllib.request
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingUnixStreamServer
 
@@ -35,6 +38,9 @@ SOCKET_PATH = os.environ.get("SOCKET_PATH", "/tmp/proxy-switch.sock")
 STATE_FILE = os.environ.get("STATE_FILE", "/tmp/proxy-switch-state.json")
 WWW_DIR = os.environ.get("WWW_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "www"))
 GATEWAY_PREFIX = os.environ.get("GATEWAY_PREFIX", "/app/proxy-switch")
+
+# mihomo external-controller 地址（MetaCubeXD 面板数据源）
+MIHOMO_API = "http://127.0.0.1:9090"
 
 # 透明代理脚本
 TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/tp.sh")
@@ -132,7 +138,9 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.route_path()
-        if path == "/api/status":
+        if path.startswith("/panel/"):
+            self.proxy_mihomo()
+        elif path == "/api/status":
             enabled, _ = tp_status()
             _state["enabled"] = enabled
             save_state()
@@ -149,6 +157,8 @@ class AdminHandler(BaseHTTPRequestHandler):
             })
         elif path == "/api/subscription":
             self.send_json({"ok": True, "subscription": get_subscription()})
+        elif path.startswith("/metacubexd"):
+            self.serve_metacubexd(path)
         elif path in ("/", "/index.html"):
             self.serve_file("index.html", "text/html; charset=utf-8")
         else:
@@ -156,7 +166,9 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.route_path()
-        if path == "/api/proxy/on":
+        if path.startswith("/panel/"):
+            self.proxy_mihomo()
+        elif path == "/api/proxy/on":
             ok, out = run_tp("start")
             enabled, _ = tp_status()
             _state["enabled"] = enabled
@@ -184,6 +196,108 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.handle_subscription()
         else:
             self.send_error(404)
+
+    def do_PUT(self):
+        path = self.route_path()
+        if path.startswith("/panel/"):
+            self.proxy_mihomo()
+        else:
+            self.send_error(404)
+
+    def do_DELETE(self):
+        path = self.route_path()
+        if path.startswith("/panel/"):
+            self.proxy_mihomo()
+        else:
+            self.send_error(404)
+
+    def do_PATCH(self):
+        path = self.route_path()
+        if path.startswith("/panel/"):
+            self.proxy_mihomo()
+        else:
+            self.send_error(404)
+
+    # ------------------------------------------------------------ MetaCubeXD
+
+    def proxy_mihomo(self):
+        """将 /panel/* 请求代理到 mihomo external-controller(127.0.0.1:9090)"""
+        path = self.path.split("?", 1)[0]
+        if path.startswith(GATEWAY_PREFIX):
+            path = path[len(GATEWAY_PREFIX):]
+        if path.startswith("/panel/"):
+            target = MIHOMO_API + path[len("/panel/"):]
+            if "?" in self.path:
+                target += "?" + self.path.split("?", 1)[1]
+        else:
+            target = MIHOMO_API + path
+        try:
+            # 读取请求体
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            body = self.rfile.read(length) if length else None
+            # 构造上游请求
+            req = urllib.request.Request(target, data=body, method=self.command)
+            # 转发关键请求头（排除 hop-by-hop）
+            for k, v in self.headers.items():
+                if k.lower() in ("content-length", "transfer-encoding", "connection", "host", "accept-encoding"):
+                    continue
+                req.add_header(k, v)
+            req.add_header("Content-Type", self.headers.get("Content-Type", "application/json"))
+            resp = urllib.request.urlopen(req, timeout=15)
+            resp_body = resp.read()
+            ctype = resp.headers.get("Content-Type", "application/json")
+            self.send_response(resp.getcode())
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(resp_body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp_body)
+        except urllib.error.HTTPError as e:
+            # 上游返回非 2xx（如 400/404），透传状态码和 body
+            try:
+                err_body = e.read()
+            except Exception:
+                err_body = b""
+            self.send_response(e.code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(err_body)))
+            self.end_headers()
+            if err_body:
+                self.wfile.write(err_body)
+        except Exception as e:
+            self.send_json({"ok": False, "error": "mihomo API 不可用：%s" % str(e)[:120]}, status=502)
+
+    def serve_metacubexd(self, path):
+        """提供 MetaCubeXD 静态页面（/metacubexd/*）"""
+        rel = path[len("/metacubexd"):].lstrip("/") or "index.html"
+        # 防路径穿越
+        if ".." in rel:
+            self.send_error(403)
+            return
+        full = os.path.join(WWW_DIR, "metacubexd", rel)
+        if os.path.isdir(full):
+            full = os.path.join(full, "index.html")
+        if not os.path.isfile(full):
+            self.send_error(404)
+            return
+        ctype = {
+            ".html": "text/html; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".png": "image/png",
+            ".ico": "image/x-icon",
+            ".woff2": "font/woff2",
+            ".webmanifest": "application/manifest+json",
+        }.get(os.path.splitext(rel)[1].lower(), "application/octet-stream")
+        with open(full, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def handle_subscription(self):
         """保存订阅链接 → 重新生成配置 → 重启代理"""
@@ -223,9 +337,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)})
 
-    def send_json(self, obj):
+    def send_json(self, obj, status=200):
         body = json.dumps(obj).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
