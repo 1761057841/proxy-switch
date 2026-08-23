@@ -319,7 +319,7 @@ body {
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
 
 /* ===== 实时连接面板 ===== */
-.conn-panel { margin-bottom: 18px; }
+.conn-panel { margin-bottom: 18px; display: flex; flex-direction: column; }
 .conn-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 16px;
@@ -331,9 +331,36 @@ body {
   background: rgba(56, 189, 248, .1); border: 1px solid rgba(56, 189, 248, .25);
   padding: 4px 10px; border-radius: 999px; letter-spacing: .3px;
 }
+.conn-stats {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px;
+  margin-bottom: 14px;
+}
+.stat-card {
+  background: rgba(15, 23, 42, .55);
+  border: 1px solid rgba(148, 163, 184, .12);
+  border-radius: 12px; padding: 10px 12px;
+  text-align: center;
+  transition: .2s;
+}
+.stat-card:hover { border-color: rgba(56, 189, 248, .3); transform: translateY(-1px); }
+.stat-label { font-size: 11px; color: #94a3b8; margin-bottom: 5px; letter-spacing: .3px; }
+.stat-val {
+  font-size: 15px; font-weight: 800; color: #e2e8f0;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.stat-up .stat-val { color: #7dd3fc; }
+.stat-down .stat-val { color: #34d399; }
+.stat-mem .stat-val { color: #fbbf24; }
+@media (max-width: 1100px) {
+  .conn-stats { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 600px) {
+  .conn-stats { grid-template-columns: repeat(2, 1fr); }
+}
 .conn-list {
   display: flex; flex-direction: column; gap: 8px;
-  max-height: 340px; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
   padding-right: 4px;
 }
 .conn-item {
@@ -487,6 +514,28 @@ body {
           <span class="conn-count" id="connCount">0 条</span>
           <button class="test-btn sub-btn" id="connRefreshBtn" type="button">⟳ 刷新</button>
           <button class="test-btn sub-btn sub-clear" id="connCloseBtn" type="button">✂ 全部断开</button>
+        </div>
+      </div>
+      <div class="conn-stats">
+        <div class="stat-card stat-up">
+          <div class="stat-label">⬆ 上传速度</div>
+          <div class="stat-val" id="statUpSpeed">0 B/s</div>
+        </div>
+        <div class="stat-card stat-down">
+          <div class="stat-label">⬇ 下载速度</div>
+          <div class="stat-val" id="statDownSpeed">0 B/s</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">📤 上传总量</div>
+          <div class="stat-val" id="statUpTotal">0 B</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">📥 下载总量</div>
+          <div class="stat-val" id="statDownTotal">0 B</div>
+        </div>
+        <div class="stat-card stat-mem">
+          <div class="stat-label">🧠 内存</div>
+          <div class="stat-val" id="statMem">0 MB</div>
         </div>
       </div>
       <div class="conn-list" id="connList">
@@ -1137,11 +1186,47 @@ async function closeAllConnections() {
   }
 }
 
+/* ===== 实时速率 + 总量 + 内存 ===== */
+let statsTimer = null;
+
+// 轮询 /api/stats（非流式，绕开网关流式缓冲问题），每 2 秒
+async function loadStats() {
+  try {
+    const res = await fetch(API + '/api/stats');
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d.ok) return;
+    document.getElementById('statUpSpeed').textContent = fmtBytes(d.upSpeed) + '/s';
+    document.getElementById('statDownSpeed').textContent = fmtBytes(d.downSpeed) + '/s';
+    document.getElementById('statUpTotal').textContent = fmtBytes(d.upTotal);
+    document.getElementById('statDownTotal').textContent = fmtBytes(d.downTotal);
+    const mb = (d.memInuse / 1048576).toFixed(1);
+    document.getElementById('statMem').textContent = mb + ' MB';
+  } catch (e) {}
+}
+
 // 连接面板事件
 document.getElementById('connRefreshBtn').addEventListener('click', loadConnections);
 document.getElementById('connCloseBtn').addEventListener('click', closeAllConnections);
-// 每 3 秒自动刷新
+// 每 3 秒自动刷新连接列表
 connTimer = setInterval(loadConnections, 3000);
+// 每 2 秒刷新实时统计
+loadStats();
+statsTimer = setInterval(loadStats, 2000);
+
+// 实时连接面板高度 = 控制台高度（内部列表滚动）
+function syncConnHeight() {
+  const consoleEl = document.querySelector('.console');
+  const connEl = document.querySelector('.conn-panel');
+  if (consoleEl && connEl) {
+    const h = consoleEl.offsetHeight;
+    if (h > 100) connEl.style.height = h + 'px';
+  }
+}
+window.addEventListener('resize', syncConnHeight);
+// 控制台内容（msg 提示等）变化时跟随 + 初次同步
+syncConnHeight();
+setInterval(syncConnHeight, 2000);
 
 refresh();
 </script>

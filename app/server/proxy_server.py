@@ -30,6 +30,7 @@ import json
 import os
 import socket
 import subprocess
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingUnixStreamServer
@@ -380,6 +381,7 @@ def test_proxy_connectivity(proxy="", user="", pw=""):
 
 class AdminHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    _stats_prev = None  # 实时速率计算用（上一次快照 (ts, upTotal, downTotal)）
 
     def route_path(self):
         path = self.path.split("?", 1)[0]
@@ -393,6 +395,8 @@ class AdminHandler(BaseHTTPRequestHandler):
         path = self.route_path()
         if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
+        elif path == "/api/stats":
+            self.send_json(self.get_live_stats())
         elif path == "/api/status":
             enabled, local_enabled, _ = tp_status()
             _state["enabled"] = enabled
@@ -549,7 +553,9 @@ class AdminHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ MetaCubeXD
 
     def proxy_mihomo(self):
-        """将 /api/mihomo/* 请求代理到 mihomo external-controller(127.0.0.1:9090)"""
+        """将 /api/mihomo/* 请求代理到 mihomo external-controller(127.0.0.1:9090)
+        支持流式端点（/traffic /memory）：用 http.client 逐块转发
+        """
         path = self.path.split("?", 1)[0]
         if path.startswith(GATEWAY_PREFIX):
             path = path[len(GATEWAY_PREFIX):]
@@ -559,13 +565,15 @@ class AdminHandler(BaseHTTPRequestHandler):
                 target += "?" + self.path.split("?", 1)[1]
         else:
             target = MIHOMO_API + path
+        # 流式端点：traffic / memory（SSE，长连接）
+        stream_endpoint = target.rstrip("/").endswith(("/traffic", "/memory"))
         try:
-            # 读取请求体
             length = int(self.headers.get("Content-Length", 0) or 0)
             body = self.rfile.read(length) if length else None
-            # 构造上游请求
+            if stream_endpoint:
+                self._proxy_stream(target, body)
+                return
             req = urllib.request.Request(target, data=body, method=self.command)
-            # 转发关键请求头（排除 hop-by-hop）
             for k, v in self.headers.items():
                 if k.lower() in ("content-length", "transfer-encoding", "connection", "host", "accept-encoding"):
                     continue
@@ -581,7 +589,6 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(resp_body)
         except urllib.error.HTTPError as e:
-            # 上游返回非 2xx（如 400/404），透传状态码和 body
             try:
                 err_body = e.read()
             except Exception:
@@ -594,6 +601,200 @@ class AdminHandler(BaseHTTPRequestHandler):
                 self.wfile.write(err_body)
         except Exception as e:
             self.send_json({"ok": False, "error": "mihomo API 不可用：%s" % str(e)[:120]}, status=502)
+
+    def get_live_stats(self):
+        """非流式实时统计：内存 + 连接汇总总量/速率
+        绕开 fnOS 网关对流式响应的缓冲问题
+        """
+        import json as _json
+        import socket as _sock
+        from urllib.parse import urlparse
+        u = urlparse(MIHOMO_API)
+        out = {"memInuse": 0, "upTotal": 0, "downTotal": 0, "connCount": 0,
+               "upSpeed": 0, "downSpeed": 0, "ok": False}
+        # 1. 内存：socket 直连读 /memory 第一条
+        try:
+            s = _sock.create_connection((u.hostname, u.port), timeout=3)
+            s.sendall(b"GET /memory HTTP/1.1\r\nHost: %s:%s\r\nAccept: */*\r\nConnection: close\r\n\r\n" % (u.hostname.encode(), str(u.port).encode()))
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                c = s.recv(4096)
+                if not c:
+                    break
+                buf += c
+            head, _, rest = buf.partition(b"\r\n\r\n")
+            chunked = b"transfer-encoding: chunked" in head.lower()
+            data = rest
+            s.settimeout(2)
+            # 读多个 chunk，取最后一个非零 inuse（第一条总是 0，统计未就绪）
+            last_inuse = 0
+            for _ in range(8):
+                # 读 chunk 大小行
+                while b"\r\n" not in data:
+                    try:
+                        more = s.recv(4096)
+                    except _sock.timeout:
+                        break
+                    if not more:
+                        break
+                    data += more
+                if b"\r\n" not in data:
+                    break
+                size_line, _, data = data.partition(b"\r\n")
+                try:
+                    size = int(size_line.split(b";")[0].strip(), 16)
+                except Exception:
+                    break
+                if size == 0:
+                    break
+                while len(data) < size + 2:
+                    try:
+                        more = s.recv(4096)
+                    except _sock.timeout:
+                        break
+                    if not more:
+                        break
+                    data += more
+                if len(data) < size + 2:
+                    break
+                payload = data[:size]
+                data = data[size + 2:]
+                try:
+                    m = _json.loads(payload)
+                    v = int(m.get("inuse", 0))
+                    if v > 0:
+                        last_inuse = v
+                except Exception:
+                    pass
+            out["memInuse"] = last_inuse
+            s.close()
+        except Exception:
+            pass
+        # 2. 连接汇总：GET /connections 普通 JSON
+        try:
+            req = urllib.request.Request(MIHOMO_API + "/connections")
+            resp = urllib.request.urlopen(req, timeout=5)
+            d = _json.loads(resp.read().decode("utf-8"))
+            cs = d.get("connections", [])
+            out["connCount"] = len(cs)
+            out["upTotal"] = sum(int(c.get("upload", 0) or 0) for c in cs)
+            out["downTotal"] = sum(int(c.get("download", 0) or 0) for c in cs)
+            out["ok"] = True
+        except Exception:
+            pass
+        # 3. 速率：基于上次快照
+        now = time.time()
+        prev = self._stats_prev
+        if prev:
+            dt = now - prev[0]
+            if dt > 0:
+                out["upSpeed"] = max(0, (out["upTotal"] - prev[1]) / dt)
+                out["downSpeed"] = max(0, (out["downTotal"] - prev[2]) / dt)
+        self._stats_prev = (now, out["upTotal"], out["downTotal"])
+        return out
+
+    def _proxy_stream(self, target, body=None):
+        """流式转发：socket 直连上游，解码 chunked，只转发纯 JSON 行
+        （mihomo /traffic /memory 是 chunked SSE 流）
+        """
+        import socket as _sock
+        from urllib.parse import urlparse
+        u = urlparse(target)
+        try:
+            s = _sock.create_connection((u.hostname, u.port), timeout=5)
+        except Exception as e:
+            self.send_json({"ok": False, "error": "连接 mihomo 失败：%s" % str(e)[:120]}, status=502)
+            return
+        try:
+            path = u.path + (("?" + u.query) if u.query else "")
+            req = "%s %s HTTP/1.1\r\nHost: %s:%s\r\nAccept: */*\r\nConnection: close\r\n\r\n" % (
+                self.command, path, u.hostname, u.port)
+            s.sendall(req.encode())
+            # 读响应头
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            head, _, rest = buf.partition(b"\r\n\r\n")
+            try:
+                status = int(head.split(b" ")[1])
+            except Exception:
+                status = 200
+            chunked = b"transfer-encoding: chunked" in head.lower()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if not chunked:
+                # 非 chunked：直接转发剩余数据
+                if rest:
+                    try:
+                        self.wfile.write(rest)
+                        self.wfile.flush()
+                    except Exception:
+                        pass
+                s.settimeout(1.0)
+                while True:
+                    try:
+                        data = s.recv(4096)
+                    except _sock.timeout:
+                        continue
+                    if not data:
+                        break
+                    try:
+                        self.wfile.write(data)
+                        self.wfile.flush()
+                    except Exception:
+                        break
+                return
+            # chunked：解码后转发纯数据（去掉大小行）
+            data = rest
+            s.settimeout(1.0)
+            while True:
+                # 读 chunk 大小行
+                while b"\r\n" not in data:
+                    try:
+                        more = s.recv(4096)
+                    except _sock.timeout:
+                        continue
+                    if not more:
+                        break
+                    data += more
+                if b"\r\n" not in data:
+                    break
+                size_line, _, data = data.partition(b"\r\n")
+                try:
+                    size = int(size_line.split(b";")[0].strip(), 16)
+                except Exception:
+                    break
+                if size == 0:
+                    break  # 结束 chunk
+                # 读满 size 字节 + 结尾 CRLF
+                while len(data) < size + 2:
+                    try:
+                        more = s.recv(4096)
+                    except _sock.timeout:
+                        continue
+                    if not more:
+                        break
+                    data += more
+                if len(data) < size + 2:
+                    break
+                payload = data[:size]
+                data = data[size + 2:]  # 跳过 chunk 数据和结尾 CRLF
+                try:
+                    self.wfile.write(payload)
+                    self.wfile.flush()
+                except Exception:
+                    break
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
 
     def serve_metacubexd(self, path):
         """提供 MetaCubeXD 静态页面（/metacubexd/*）"""
