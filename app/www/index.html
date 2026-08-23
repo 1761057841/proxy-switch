@@ -5,261 +5,403 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NAS 透明代理</title>
 <style>
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { min-height: 100%; }
 body {
   font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   min-height: 100vh;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  background:
+    radial-gradient(1000px 500px at 85% -10%, rgba(56, 189, 248, .13), transparent 60%),
+    radial-gradient(800px 500px at -10% 110%, rgba(168, 85, 247, .12), transparent 60%),
+    linear-gradient(150deg, #0f172a 0%, #111c33 45%, #0b1226 100%);
   color: #e2e8f0;
+  padding: 24px 20px 40px;
 }
-.card {
-  width: 460px; max-width: 92vw;
-  background: rgba(30, 41, 59, .75);
-  border: 1px solid rgba(148, 163, 184, .2);
-  border-radius: 20px;
-  padding: 40px 36px;
-  backdrop-filter: blur(12px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
-  text-align: center;
+.shell { max-width: 1240px; margin: 0 auto; }
+
+/* ===== 顶部栏 ===== */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  background: rgba(15, 23, 42, .55);
+  border: 1px solid rgba(148, 163, 184, .16);
+  border-radius: 18px;
+  padding: 16px 22px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+  margin-bottom: 20px;
 }
-h1 { font-size: 22px; margin-bottom: 6px; }
-.sub { color: #94a3b8; font-size: 13px; margin-bottom: 28px; }
-.status-row {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  margin-bottom: 18px; font-size: 16px; font-weight: 500;
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-icon {
+  width: 46px; height: 46px; border-radius: 14px; font-size: 24px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, rgba(56, 189, 248, .25), rgba(168, 85, 247, .25));
+  border: 1px solid rgba(56, 189, 248, .35);
+  box-shadow: 0 0 18px rgba(56, 189, 248, .25);
 }
-.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-.dot.on { background: #22c55e; box-shadow: 0 0 12px #22c55e; }
-.dot.off { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
-.addr {
+.brand-text h1 { font-size: 20px; font-weight: 700; letter-spacing: .3px; }
+.brand-text p { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+.pill {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
   background: rgba(15, 23, 42, .6);
-  border: 1px dashed rgba(148, 163, 184, .35);
-  border-radius: 10px;
-  padding: 12px;
-  font-family: ui-monospace, Consolas, "Courier New", monospace;
-  font-size: 14px;
-  color: #7dd3fc;
-  margin-bottom: 24px;
-  word-break: break-all;
-  user-select: all;
+  border: 1px solid rgba(148, 163, 184, .2);
 }
-.addr.empty { color: #64748b; }
-.addr.saved { color: #fbbf24; border-style: solid; }
-.mode-row {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin-bottom: 14px; padding: 10px; background: rgba(15, 23, 42, .5);
-  border-radius: 10px;
+.pill .dot { width: 11px; height: 11px; border-radius: 50%; }
+.pill .dot.on { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: breathe 2s infinite; }
+.pill .dot.off { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
+@keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* ===== 主布局：左右两栏 ===== */
+.layout {
+  display: grid; grid-template-columns: 360px 1fr; gap: 20px;
+  align-items: start;
 }
-.mode-label { font-size: 13px; color: #94a3b8; margin-right: 2px; }
-.mode-btn {
-  background: #1e293b; color: #cbd5e1; border: 1px solid #334155;
-  border-radius: 999px; padding: 6px 14px; font-size: 13px;
-  cursor: pointer; transition: all .2s;
+.panel {
+  background: rgba(15, 23, 42, .6);
+  border: 1px solid rgba(148, 163, 184, .16);
+  border-radius: 18px;
+  padding: 22px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
 }
-.mode-btn:hover { border-color: #38bdf8; color: #7dd3fc; }
-.mode-btn.active {
-  background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #7dd3fc;
-  box-shadow: 0 0 8px rgba(56, 189, 248, .35);
+.panel-title {
+  font-size: 15px; font-weight: 700; color: #f1f5f9;
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 14px; margin-bottom: 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, .14);
+  letter-spacing: .3px;
 }
-.mode-desc { font-size: 12px; color: #64748b; margin-left: 4px; flex-basis: 100%; }
-.switch {
-  position: relative; display: inline-block; width: 120px; height: 56px; cursor: pointer;
+
+/* ===== 左栏：控制台 ===== */
+.console .toggle-block {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 10px 0 18px;
 }
+.switch { position: relative; display: inline-block; width: 132px; height: 62px; cursor: pointer; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider {
-  position: absolute; inset: 0; border-radius: 28px;
-  background: #334155; transition: .3s;
+  position: absolute; inset: 0; border-radius: 31px;
+  background: linear-gradient(135deg, #334155, #1e293b);
+  border: 1px solid rgba(148, 163, 184, .25);
+  transition: .3s;
 }
 .slider::before {
-  content: ""; position: absolute; width: 44px; height: 44px; border-radius: 50%;
-  left: 6px; top: 6px; background: #94a3b8; transition: .3s;
+  content: ""; position: absolute; width: 48px; height: 48px; border-radius: 50%;
+  left: 7px; top: 6px; background: linear-gradient(135deg, #94a3b8, #64748b);
+  transition: .3s;
+  box-shadow: 0 3px 8px rgba(0,0,0,.4);
 }
-.switch input:checked + .slider { background: #059669; }
-.switch input:checked + .slider::before { transform: translateX(64px); background: #fff; }
-.config {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(148, 163, 184, .18);
-  text-align: left;
+.switch input:checked + .slider {
+  background: linear-gradient(135deg, #059669, #047857);
+  border-color: rgba(52, 211, 153, .5);
+  box-shadow: 0 0 22px rgba(5, 150, 105, .45);
 }
-.config h2 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
-.btn-row { display: flex; gap: 10px; margin-top: 6px; }
+.switch input:checked + .slider::before { transform: translateX(68px); background: #fff; }
+.addr {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 14px; font-weight: 600; color: #7dd3fc;
+  padding: 9px 18px; border-radius: 10px;
+  background: rgba(56, 189, 248, .08);
+  border: 1px dashed rgba(56, 189, 248, .3);
+  word-break: break-all; user-select: all; text-align: center;
+}
+.addr.empty { color: #64748b; background: rgba(148, 163, 184, .06); border-color: rgba(148, 163, 184, .2); }
+.addr.saved { color: #fbbf24; border-style: solid; border-color: rgba(251, 191, 36, .4); }
+
+.block { margin-bottom: 18px; }
+.block-label {
+  font-size: 12px; font-weight: 600; color: #94a3b8;
+  margin-bottom: 8px; letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.mode-row {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  background: rgba(2, 6, 23, .5);
+  border: 1px solid rgba(148, 163, 184, .16);
+  border-radius: 12px; padding: 5px;
+}
+.mode-btn {
+  border: none; border-radius: 9px; padding: 9px 4px;
+  background: transparent; color: #94a3b8;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all .2s; font-family: inherit;
+}
+.mode-btn:hover { color: #cbd5e1; }
+.mode-btn.active {
+  background: linear-gradient(135deg, rgba(56, 189, 248, .22), rgba(56, 189, 248, .1));
+  color: #7dd3fc;
+  box-shadow: 0 0 12px rgba(56, 189, 248, .25), inset 0 0 0 1px rgba(56, 189, 248, .45);
+}
+.mode-desc {
+  font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.5;
+  min-height: 18px;
+}
+.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .test-btn {
-  flex: 1; padding: 10px;
-  background: rgba(148, 163, 184, .15);
-  border: 1px solid rgba(148, 163, 184, .4);
-  border-radius: 8px;
+  padding: 12px 10px;
+  background: rgba(148, 163, 184, .1);
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 11px;
   color: #cbd5e1; font-size: 14px; font-weight: 600;
-  cursor: pointer; transition: opacity .2s;
+  cursor: pointer; transition: all .2s; font-family: inherit;
 }
-.test-btn:hover { opacity: .85; }
-.test-btn:disabled { opacity: .5; cursor: not-allowed; }
-.msg { text-align: center; font-size: 13px; margin-top: 10px; min-height: 18px; line-height: 1.5; }
+.test-btn:hover {
+  background: rgba(56, 189, 248, .14);
+  border-color: rgba(56, 189, 248, .45);
+  color: #7dd3fc;
+  transform: translateY(-1px);
+}
+.test-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.msg { text-align: center; font-size: 13px; margin-top: 12px; min-height: 20px; line-height: 1.5; }
 .msg.ok { color: #4ade80; }
 .msg.err { color: #f87171; }
 .msg.info { color: #fbbf24; }
-.hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; text-align: left; }
-.hint b { color: #94a3b8; }
-.sub-input {
-  width: 100%; padding: 10px 12px;
-  background: rgba(15, 23, 42, .6);
-  border: 1px solid rgba(148, 163, 184, .35);
-  border-radius: 8px;
-  color: #e2e8f0; font-size: 13px;
-  font-family: ui-monospace, Consolas, monospace;
-  margin-bottom: 10px;
-  outline: none;
+
+/* ===== 右栏：订阅机场 ===== */
+.subs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, .14); }
+.subs-head .panel-title { border: none; padding: 0; margin: 0; }
+.subs-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.subs-tools .test-btn { padding: 8px 14px; font-size: 13px; }
+.sub-btn { flex: none; }
+.sub-clear { background: rgba(239, 68, 68, .1); border-color: rgba(239, 68, 68, .35); color: #fca5a5; }
+.sub-clear:hover { background: rgba(239, 68, 68, .2); border-color: rgba(239, 68, 68, .6); color: #fecaca; }
+.sub-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 14px; align-items: start;
 }
-.sub-input:focus { border-color: #38bdf8; }
-.sub-btn { flex: 1; }
-.sub-clear { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .4); color: #fca5a5; }
-.sub-hint { margin-top: 8px; font-size: 11px; color: #64748b; line-height: 1.6; text-align: left; }
+.sub-hint { margin-top: 14px; font-size: 11px; color: #94a3b8; line-height: 1.7; }
+
+/* ---- 订阅卡片 ---- */
 .sub-item {
-  background: rgba(15, 23, 42, .5);
-  border: 1px solid rgba(148, 163, 184, .25);
-  border-radius: 12px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  background: linear-gradient(160deg, rgba(30, 41, 59, .65), rgba(15, 23, 42, .75));
+  border: 1px solid rgba(148, 163, 184, .22);
+  border-radius: 14px;
+  padding: 14px 16px;
   position: relative;
+  transition: transform .2s, border-color .2s, box-shadow .2s;
 }
-.sub-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.sub-card-name { font-size: 15px; font-weight: 600; color: #f1f5f9; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-item:hover {
+  transform: translateY(-2px);
+  border-color: rgba(56, 189, 248, .4);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .35), 0 0 0 1px rgba(56, 189, 248, .12);
+}
+.sub-card-top { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+.sub-card-name { font-size: 14px; font-weight: 700; color: #f1f5f9; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sub-tag {
-  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
   background: rgba(251, 146, 60, .15); color: #fb923c; border: 1px solid rgba(251, 146, 60, .3);
 }
-.sub-tag.http { background: rgba(180, 140, 90, .18); color: #c9a97a; border-color: rgba(180, 140, 90, .35); }
-.sub-tag.gray { background: rgba(148, 163, 184, .15); color: #94a3b8; border-color: rgba(148, 163, 184, .3); }
+.sub-tag.http { background: rgba(180, 140, 90, .16); color: #c9a97a; border-color: rgba(180, 140, 90, .35); }
+.sub-tag.gray { background: rgba(148, 163, 184, .14); color: #94a3b8; border-color: rgba(148, 163, 184, .28); }
 .sub-icon-btn {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: rgba(148, 163, 184, .12); border: 1px solid rgba(148, 163, 184, .3);
-  color: #cbd5e1; font-size: 14px; cursor: pointer; display: inline-flex;
+  width: 28px; height: 28px; border-radius: 8px;
+  background: rgba(148, 163, 184, .1); border: 1px solid rgba(148, 163, 184, .26);
+  color: #cbd5e1; font-size: 13px; cursor: pointer; display: inline-flex;
   align-items: center; justify-content: center; transition: all .15s;
 }
-.sub-icon-btn:hover { background: rgba(148, 163, 184, .25); }
-.sub-icon-btn.del:hover { background: rgba(239, 68, 68, .25); border-color: rgba(239, 68, 68, .5); color: #fca5a5; }
-.sub-icon-btn.speed { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
-.sub-icon-btn.speed:hover { background: rgba(251, 191, 36, .15); border-color: #fbbf24; }
+.sub-icon-btn:hover { background: rgba(148, 163, 184, .24); }
+.sub-icon-btn.del:hover { background: rgba(239, 68, 68, .28); border-color: rgba(239, 68, 68, .5); color: #fca5a5; }
+.sub-icon-btn.speed { color: #fbbf24; border-color: rgba(251, 191, 36, .4); }
+.sub-icon-btn.speed:hover { background: rgba(251, 191, 36, .16); border-color: #fbbf24; }
 .sub-icon-btn:disabled { opacity: .5; cursor: wait; }
 .sub-card-mid { margin-bottom: 10px; }
-.sub-traffic-num { font-size: 13px; font-weight: 600; color: #f0abfc; font-family: ui-monospace, Consolas, monospace; }
-.sub-traffic-label { font-size: 11px; color: #94a3b8; }
-.sub-traffic-row { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
 .sub-traffic-bar {
-  width: 100%; height: 6px; border-radius: 3px; overflow: hidden;
-  background: rgba(148, 163, 184, .15); position: relative;
+  width: 100%; height: 7px; border-radius: 4px; overflow: hidden;
+  background: rgba(148, 163, 184, .13); position: relative;
+  margin-top: 14px;
 }
 .sub-traffic-fill {
-  height: 100%; border-radius: 3px;
-  background: linear-gradient(90deg, #f472b6, #ef4444);
-  transition: width .4s ease;
+  height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #38bdf8, #818cf8, #f472b6);
+  transition: width .5s ease;
+  box-shadow: 0 0 8px rgba(129, 140, 248, .5);
 }
-.sub-card-bottom { display: flex; align-items: center; font-size: 12px; color: #94a3b8; flex-wrap: wrap; gap: 6px; }
-.sub-card-bottom .exp { color: #cbd5e1; }
+.sub-traffic-pct {
+  position: absolute; right: 0; top: -14px;
+  font-size: 10px; font-weight: 700; color: #f472b6;
+  font-family: ui-monospace, Consolas, monospace;
+  text-shadow: 0 0 6px rgba(244, 114, 182, .4);
+}
+.sub-traffic-row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+.sub-traffic-num {
+  font-size: 17px; font-weight: 700; color: #e2e8f0;
+  font-family: ui-monospace, Consolas, monospace;
+  letter-spacing: .3px;
+}
+.sub-traffic-label { font-size: 11px; color: #94a3b8; }
+.sub-card-bottom { display: flex; align-items: center; font-size: 11px; color: #94a3b8; flex-wrap: wrap; gap: 6px; }
+.sub-card-bottom .exp { color: #cbd5e1; font-weight: 600; }
 .sub-card-bottom .upd {
-  font-size: 11px; background: rgba(148, 163, 184, .12);
-  padding: 2px 8px; border-radius: 6px; color: #94a3b8;
+  font-size: 10px; background: rgba(148, 163, 184, .1);
+  padding: 2px 7px; border-radius: 6px; color: #94a3b8;
 }
 .sub-expand-btn {
-  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(148, 163, 184, .35);
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(148, 163, 184, .32);
   background: rgba(148, 163, 184, .1); color: #cbd5e1; font-size: 12px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; margin-left: auto;
-  transition: transform .2s, background .2s, border-color .2s, color .2s;
+  transition: transform .25s, background .2s, border-color .2s, color .2s;
 }
 .sub-expand-btn:hover { background: rgba(56, 189, 248, .2); border-color: #38bdf8; color: #7dd3fc; }
 .sub-expand-btn.open { transform: rotate(180deg); background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #7dd3fc; }
-.sub-nodes { display: none; margin-top: 10px; border-top: 1px dashed rgba(148, 163, 184, .25); padding-top: 10px; }
-.sub-nodes .px-grid { max-height: 320px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
-.sub-nodes .px-node { font-size: 12px; }
+.sub-nodes { display: none; margin-top: 10px; border-top: 1px dashed rgba(148, 163, 184, .22); padding-top: 10px; }
 .sub-nodes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; color: #94a3b8; }
-.sub-nodes-head .px-group-tab { pointer-events: none; opacity: .85; }
+.px-group-tab {
+  padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: 600;
+  background: rgba(56, 189, 248, .12); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, .3);
+}
 .sub-edit-form { margin-top: 10px; border-top: 1px dashed rgba(148, 163, 184, .2); padding-top: 10px; }
-.sub-edit-form .sub-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.sub-edit-form .sub-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .sub-edit-form input[type=text] {
-  flex: 1; padding: 8px 10px;
-  background: rgba(15, 23, 42, .6);
-  border: 1px solid rgba(148, 163, 184, .35);
-  border-radius: 6px;
-  color: #e2e8f0; font-size: 13px;
-  outline: none;
+  flex: 1; min-width: 120px; padding: 8px 10px;
+  background: rgba(2, 6, 23, .5);
+  border: 1px solid rgba(148, 163, 184, .3);
+  border-radius: 8px;
+  color: #e2e8f0; font-size: 12px;
+  outline: none; font-family: inherit;
 }
 .sub-edit-form input[type=text]:focus { border-color: #38bdf8; }
 
-/* ---- 节点网格（内嵌卡片）---- */
-.px-group-tab {
-  padding: 4px 10px; border-radius: 6px; font-size: 11px;
-  background: rgba(148, 163, 184, .12); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, .25);
+/* ---- 节点网格 ---- */
+/* 细圆角滚动条 */
+.px-grid::-webkit-scrollbar, .sub-nodes::-webkit-scrollbar { width: 6px; }
+.px-grid::-webkit-scrollbar-track, .sub-nodes::-webkit-scrollbar-track { background: transparent; }
+.px-grid::-webkit-scrollbar-thumb, .sub-nodes::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, .3); border-radius: 3px;
 }
-.px-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.px-grid::-webkit-scrollbar-thumb:hover, .sub-nodes::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, .5); }
+.px-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px; max-height: 340px; overflow-y: auto; padding-right: 4px;
+}
 .px-node {
-  background: rgba(15, 23, 42, .55); border: 1px solid rgba(148, 163, 184, .25);
-  border-radius: 8px; padding: 8px 10px; cursor: pointer; transition: all .15s;
-  display: flex; align-items: center; gap: 8px;
+  background: rgba(2, 6, 23, .45); border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 9px; padding: 7px 9px; cursor: pointer; transition: all .18s;
+  display: flex; align-items: center; gap: 6px;
 }
-.px-node:hover { border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .06); }
-.px-node.active { border-color: #38bdf8; background: rgba(56, 189, 248, .12); box-shadow: 0 0 0 1px rgba(56, 189, 248, .4); }
-.px-node-name { flex: 1; font-size: 12px; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.px-node-name .px-check { color: #38bdf8; margin-right: 4px; }
-.px-delay { font-size: 11px; font-family: ui-monospace, Consolas, monospace; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
-.px-delay.good { color: #4ade80; background: rgba(74, 222, 128, .12); }
-.px-delay.mid { color: #fbbf24; background: rgba(251, 191, 36, .12); }
-.px-delay.bad { color: #f87171; background: rgba(248, 113, 113, .12); }
+.px-node:hover { border-color: rgba(56, 189, 248, .5); background: rgba(56, 189, 248, .06); transform: translateY(-1px); }
+.px-node.active {
+  border-color: #38bdf8; background: rgba(56, 189, 248, .12);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, .4), 0 0 14px rgba(56, 189, 248, .2);
+  transform: scale(1.02);
+}
+.px-node-name { flex: 1; font-size: 11px; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.px-node-name .px-check { color: #38bdf8; margin-right: 3px; }
+.px-delay {
+  font-size: 10px; font-family: ui-monospace, Consolas, monospace;
+  padding: 1px 6px; border-radius: 999px; white-space: nowrap; font-weight: 700;
+}
+.px-delay.good { color: #4ade80; background: rgba(74, 222, 128, .14); box-shadow: inset 0 0 0 1px rgba(74, 222, 128, .25); }
+.px-delay.mid { color: #fbbf24; background: rgba(251, 191, 36, .14); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, .25); }
+.px-delay.bad { color: #f87171; background: rgba(248, 113, 113, .14); box-shadow: inset 0 0 0 1px rgba(248, 113, 113, .25); }
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
+
+/* ===== 底部说明 ===== */
+.hint {
+  margin-top: 20px; font-size: 12px; color: #94a3b8; line-height: 1.9;
+  background: rgba(15, 23, 42, .4);
+  border: 1px solid rgba(148, 163, 184, .12);
+  border-radius: 14px; padding: 14px 18px;
+  backdrop-filter: blur(10px);
+}
+.hint b { color: #94a3b8; }
+.hint code {
+  background: rgba(148, 163, 184, .12); padding: 1px 6px; border-radius: 4px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: #7dd3fc;
+}
+
+/* ===== 响应式：窄屏回退单列 ===== */
+@media (max-width: 940px) {
+  .layout { grid-template-columns: 1fr; }
+  .sub-grid { grid-template-columns: 1fr; }
+  .topbar { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 480px) {
+  body { padding: 14px 10px 30px; }
+  .panel { padding: 16px; }
+  .subs-tools { width: 100%; }
+  .subs-tools .test-btn { flex: 1; }
+}
 
 </style>
 </head>
+
 <body>
-<div class="card" id="mainView">
-  <h1>🌐 NAS 透明代理</h1>
-  <p class="sub">一键开关 · 全机实时生效（Chrome / 下载 / Docker）</p>
-  <div class="status-row">
-    <span class="dot" id="dot"></span>
-    <span id="statusText">加载中…</span>
-  </div>
-  <div class="addr empty" id="addr">—</div>
-  <label class="switch">
-    <input type="checkbox" id="toggle">
-    <span class="slider"></span>
-  </label>
-
-  <div class="config">
-    <h2>⚙️ 代理状态</h2>
-    <div class="mode-row" id="modeRow">
-      <span class="mode-label">模式：</span>
-      <button class="mode-btn" data-mode="manual" type="button" title="手动选择节点">🔧 手动</button>
-      <button class="mode-btn" data-mode="auto" type="button" title="自动选延迟最低的节点">⚡ 自动选择</button>
-      <button class="mode-btn" data-mode="fallback" type="button" title="节点故障时自动切换下一个">🔁 故障转移</button>
-      <span class="mode-desc" id="modeDesc"></span>
+<div class="shell">
+  <!-- 顶部栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">🌐</div>
+      <div class="brand-text">
+        <h1>NAS 透明代理</h1>
+        <p>一键开关 · 全机实时生效（Chrome / 下载 / Docker）</p>
+      </div>
     </div>
-    <div class="btn-row">
-      <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
-      <button class="test-btn" id="panelBtn" type="button" onclick="window.open(API + '/metacubexd/?v=20260823-1352', '_blank')">📊 节点面板</button>
+    <div class="pill" id="statusPill">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">加载中…</span>
     </div>
-    <div class="msg" id="msg"></div>
-  </div>
+  </header>
 
-  <div class="config">
-    <h2>📡 订阅设置（可选）</h2>
-    <div id="subList"></div>
-    <div class="btn-row">
-      <button class="test-btn sub-btn" id="subAddBtn" type="button">➕ 添加订阅</button>
-      <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
-      <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
-    </div>
-    <div class="msg" id="subMsg"></div>
-    <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
-  </div>
+  <!-- 主区：左右两栏 -->
+  <main class="layout">
 
-  <div class="hint">
+    <!-- 左栏：控制台 -->
+    <section class="panel console">
+      <h2 class="panel-title">🎛️ 控制台</h2>
+      <div class="toggle-block">
+        <label class="switch">
+          <input type="checkbox" id="toggle">
+          <span class="slider"></span>
+        </label>
+        <div class="addr empty" id="addr">—</div>
+      </div>
+      <div class="block">
+        <div class="block-label">代理模式</div>
+        <div class="mode-row" id="modeRow">
+          <button class="mode-btn" data-mode="manual" type="button" title="手动选择节点">🔧 手动</button>
+          <button class="mode-btn" data-mode="auto" type="button" title="自动选延迟最低的节点">⚡ 自动选择</button>
+          <button class="mode-btn" data-mode="fallback" type="button" title="节点故障时自动切换下一个">🔁 故障转移</button>
+        </div>
+        <div class="mode-desc" id="modeDesc"></div>
+      </div>
+      <div class="block">
+        <div class="block-label">操作</div>
+        <div class="btn-row">
+          <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
+          <button class="test-btn" id="panelBtn" type="button" onclick="window.open(API + '/metacubexd/?v=20260823-1352', '_blank')">📊 节点面板</button>
+        </div>
+      </div>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <!-- 右栏：订阅机场 -->
+    <section class="panel subs">
+      <div class="subs-head">
+        <h2 class="panel-title">📡 订阅机场</h2>
+        <div class="subs-tools">
+          <button class="test-btn sub-btn" id="subAddBtn" type="button">➕ 添加订阅</button>
+          <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
+          <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
+        </div>
+      </div>
+      <div class="msg" id="subMsg"></div>
+      <div id="subList" class="sub-grid"></div>
+      <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
+    </section>
+  </main>
+
+  <!-- 底部说明 -->
+  <footer class="hint">
     <b>说明：</b><br>
     · 开启 = 全机流量实时走代理（网络层劫持，Chrome 无需任何设置，已开的页面刷新即生效）<br>
     · 关闭 = 立即恢复直连<br>
     · 节点在 <code>/vol1/@appdata/proxy-switch/transparent-proxy/tp-config.yaml</code> 中维护<br>
     · 内网地址（192.168.x / 10.x 等）自动直连，不受影响<br>
     · 📊 节点面板 = 在新窗口打开 MetaCubeXD 完整面板（高级功能，需已开启代理）
-  </div>
+  </footer>
 </div>
+
 <script>
 const API = '/app/proxy-switch';
 let busy = false;
@@ -432,7 +574,7 @@ function renderSubList() {
         '<button class="sub-icon-btn del" data-act="del" title="删除">🗑</button>' +
       '</div>' +
       '<div class="sub-card-mid">' +
-        '<div class="sub-traffic-bar"><div class="sub-traffic-fill" style="width:' + pct + '%"></div></div>' +
+        '<div class="sub-traffic-bar"><div class="sub-traffic-fill" style="width:' + pct + '%"></div><span class="sub-traffic-pct">' + pct + '%</span></div>' +
         '<div class="sub-traffic-row">' +
           '<span class="sub-traffic-num">' + esc(trafficMain) + '</span>' +
           '<span class="sub-traffic-label">' + (st.trafficTotal ? '已用 / 总流量' : '剩余流量') + '</span>' +
@@ -753,5 +895,4 @@ document.getElementById('toggle').addEventListener('change', async (e) => {
 
 refresh();
 </script>
-</body>
 </html>
