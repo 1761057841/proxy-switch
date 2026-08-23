@@ -965,7 +965,7 @@ document.getElementById('localToggle').addEventListener('change', async (e) => {
       setMsg('❌ ' + (data.error || '操作失败'), 'err');
       e.target.checked = !on;
     }
-    render(data.localEnabled !== undefined ? (data.localEnabled ? true : false) : on, data.proxy, data.localEnabled);
+    render(data.enabled !== undefined ? data.enabled : on, data.proxy, data.localEnabled);
   } catch (err) {
     e.target.checked = !on;
     setMsg('❌ 无法连接服务', 'err');
