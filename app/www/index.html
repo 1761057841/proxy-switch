@@ -98,13 +98,6 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .sub-btn { flex: 1; }
 .sub-clear { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .4); color: #fca5a5; }
 .sub-hint { margin-top: 8px; font-size: 11px; color: #64748b; line-height: 1.6; text-align: left; }
-.panel-card { width: min(1200px, 96vw); max-width: 96vw; padding: 20px; }
-.panel-head {
-  display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
-}
-.back-btn { flex: 0 0 auto; width: auto; padding: 8px 16px; }
-.panel-title { font-size: 16px; font-weight: 600; color: #e2e8f0; }
-#panelFrame { background: #0b1220; }
 </style>
 </head>
 <body>
@@ -125,7 +118,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     <h2>⚙️ 代理状态</h2>
     <div class="btn-row">
       <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
-      <button class="test-btn" id="panelBtn" type="button" onclick="openPanel()">📊 节点面板</button>
+      <button class="test-btn" id="panelBtn" type="button" onclick="window.open(API + '/metacubexd/?v=20260823-1352', '_blank')">📊 节点面板</button>
     </div>
     <div class="msg" id="msg"></div>
   </div>
@@ -146,34 +139,13 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     · 开启 = 全机流量实时走代理（网络层劫持，Chrome 无需任何设置，已开的页面刷新即生效）<br>
     · 关闭 = 立即恢复直连<br>
     · 节点在 <code>/vol1/@appdata/proxy-switch/transparent-proxy/tp-config.yaml</code> 中维护<br>
-    · 内网地址（192.168.x / 10.x 等）自动直连，不受影响
+    · 内网地址（192.168.x / 10.x 等）自动直连，不受影响<br>
+    · 📊 节点面板 = 在新窗口打开 MetaCubeXD 面板（需已开启代理）
   </div>
-</div>
-
-<!-- 节点面板视图（内嵌） -->
-<div class="card panel-card" id="panelView" style="display:none">
-  <div class="panel-head">
-    <button class="test-btn back-btn" id="backBtn" type="button" onclick="closePanel()">← 返回开关</button>
-    <span class="panel-title">📊 节点面板</span>
-  </div>
-  <iframe id="panelFrame" src="" style="width:100%;height:70vh;min-height:480px;border:0;border-radius:12px;background:#0b1220;"></iframe>
 </div>
 <script>
 const API = '/app/proxy-switch';
 let busy = false;
-
-function openPanel() {
-  document.getElementById('mainView').style.display = 'none';
-  const pv = document.getElementById('panelView');
-  pv.style.display = 'block';
-  const frame = document.getElementById('panelFrame');
-  if (!frame.src) frame.src = API + '/metacubexd/?v=20260823-1350';
-}
-
-function closePanel() {
-  document.getElementById('panelView').style.display = 'none';
-  document.getElementById('mainView').style.display = 'block';
-}
 
 async function refresh() {
   try {
