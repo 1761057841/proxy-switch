@@ -64,6 +64,32 @@ start() {
     echo "iptables 规则已添加 + DNS 已指向本机 → 全机走代理（实时生效）"
 }
 
+# 只关本机代理：删 iptables 规则 + 恢复 DNS，但保留 mihomo 运行（7890 端口供其他设备手动设置代理使用）
+stop_local() {
+    del_rules
+    echo "iptables 规则已删除 → 本机立即直连"
+    if [ -f "$RESOLV_BAK" ]; then
+        cp "$RESOLV_BAK" "$RESOLV_CONF"
+    else
+        bash -c "echo 'nameserver $DNS_SERVER' > $RESOLV_CONF"
+    fi
+    echo "DNS 已恢复（mihomo 保持运行，7890 端口继续供其他设备使用）"
+}
+
+# 只开本机代理：mihomo 必须已在运行，只加 iptables 规则 + DNS
+start_local() {
+    if ! mihomo_running; then
+        echo "mihomo 未运行，无法开启本机代理（请先开启总代理）"
+        exit 1
+    fi
+    add_rules
+    if [ ! -f "$RESOLV_BAK" ]; then
+        cp "$RESOLV_CONF" "$RESOLV_BAK"
+    fi
+    bash -c "echo 'nameserver 127.0.0.1' > $RESOLV_CONF"
+    echo "iptables 规则已添加 + DNS 已指向本机 → 全机走代理（实时生效）"
+}
+
 stop() {
     del_rules
     echo "iptables 规则已删除 → 立即直连"
@@ -101,7 +127,7 @@ purge() {
 
 status() {
     echo "--- iptables ---"
-    ipt -t nat -L TP_OUT -n 2>/dev/null | head -12 || echo "(无 TP_OUT 链 → 代理未开启)"
+    ipt -t nat -L TP_OUT -n 2>/dev/null | head -12 || echo "(无 TP_OUT 链 → 本机代理未开启)"
     echo "--- mihomo ---"
     mihomo_running && echo "mihomo 运行中 (pid $(pgrep -f "mihomo -d $BASE" | head -1))" || echo "mihomo 未运行"
     echo "--- 端口 ---"
@@ -114,8 +140,10 @@ status() {
 case "${1:-}" in
     start) start ;;
     stop) stop ;;
+    start-local) start_local ;;
+    stop-local) stop_local ;;
     status) status ;;
     restart) stop; sleep 1; start ;;
     purge) purge ;;
-    *) echo "用法: $0 start|stop|status|restart|purge"; exit 1 ;;
+    *) echo "用法: $0 start|stop|start-local|stop-local|status|restart|purge"; exit 1 ;;
 esac

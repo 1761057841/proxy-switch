@@ -52,7 +52,7 @@ TP_CONFIG = os.path.join(TP_DIR, "tp-config.yaml")
 # manual → PROXY（手动选节点）; auto → 自动选择（url-test 最低延迟）; fallback → 故障转移
 MODE_GROUPS = {"manual": "PROXY", "auto": "自动选择", "fallback": "故障转移"}
 
-_state = {"enabled": False, "subscriptions": [], "mode": "manual"}
+_state = {"enabled": False, "subscriptions": [], "mode": "manual", "local_enabled": False}
 
 
 def load_state():
@@ -63,6 +63,7 @@ def load_state():
     except Exception:
         _state = {"enabled": False, "subscriptions": []}
     _state.setdefault("enabled", False)
+    _state.setdefault("local_enabled", False)
     _state.setdefault("mode", "manual")
     if _state.get("mode") not in MODE_GROUPS:
         _state["mode"] = "manual"
@@ -261,15 +262,33 @@ def run_tp(action):
 
 
 def tp_status():
-    """解析 tp.sh status 输出，判断代理是否开启"""
+    """解析 tp.sh status 输出，判断代理是否开启
+    返回 (enabled, local_enabled, output)
+      enabled: 总开关 = mihomo 是否在运行（7890 供其他设备用）
+      local_enabled: 本机透明代理（TP_OUT 规则存在）
+    """
     try:
         p = subprocess.run(["bash", TP_SCRIPT, "status"],
                            capture_output=True, text=True, timeout=15)
         out = (p.stdout or "") + (p.stderr or "")
-        enabled = "mihomo 运行中" in out and "TP_OUT" in out
-        return enabled, out
+        local_enabled = "TP_OUT" in out
+        enabled = "mihomo 运行中" in out
+        return enabled, local_enabled, out
     except Exception:
-        return False, ""
+        return False, False, ""
+
+
+def set_local_proxy(on):
+    """只开关本机透明代理（iptables+DNS），不影响 mihomo 进程
+    on=True  → tp.sh start-local（mihomo 必须已在运行）
+    on=False → tp.sh stop-local（保留 mihomo 7890 给其他设备）
+    返回 (ok, msg)
+    """
+    action = "start-local" if on else "stop-local"
+    ok, out = run_tp(action)
+    if not ok:
+        return False, out
+    return True, out
 
 
 def get_mode():
@@ -375,11 +394,13 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         elif path == "/api/status":
-            enabled, _ = tp_status()
+            enabled, local_enabled, _ = tp_status()
             _state["enabled"] = enabled
+            _state["local_enabled"] = local_enabled
             save_state()
             self.send_json({
                 "enabled": enabled,
+                "localEnabled": local_enabled,
                 "proxy": "mihomo 透明代理",
                 "mode": get_mode(),
             })
@@ -439,18 +460,42 @@ class AdminHandler(BaseHTTPRequestHandler):
                 self.send_json({"enabled": False, "proxy": "", "error": str(e)})
                 return
             ok, out = run_tp("start")
-            enabled, _ = tp_status()
+            enabled, local_enabled, _ = tp_status()
             _state["enabled"] = enabled
+            _state["local_enabled"] = local_enabled
             save_state()
             if ok and enabled:
-                self.send_json({"enabled": True, "proxy": "mihomo 透明代理", "msg": out})
+                self.send_json({"enabled": True, "localEnabled": local_enabled, "proxy": "mihomo 透明代理", "msg": out})
             else:
                 self.send_json({"enabled": False, "proxy": "", "error": out or "启动失败"})
         elif path == "/api/proxy/off":
             ok, out = run_tp("stop")
             _state["enabled"] = False
+            _state["local_enabled"] = False
             save_state()
-            self.send_json({"enabled": False, "proxy": "", "msg": out or "已关闭"})
+            self.send_json({"enabled": False, "localEnabled": False, "proxy": "", "msg": out or "已关闭"})
+        elif path == "/api/local/on":
+            # 只开本机透明代理（mihomo 需已在运行）
+            ok, out = set_local_proxy(True)
+            enabled, local_enabled, _ = tp_status()
+            _state["enabled"] = enabled
+            _state["local_enabled"] = local_enabled
+            save_state()
+            if ok:
+                self.send_json({"ok": True, "enabled": enabled, "localEnabled": local_enabled, "msg": out})
+            else:
+                self.send_json({"ok": False, "enabled": enabled, "localEnabled": local_enabled, "error": out or "开启失败（mihomo 未运行？）"})
+        elif path == "/api/local/off":
+            # 只关本机透明代理：删规则+恢复 DNS，mihomo 保留（其他设备继续用 7890）
+            ok, out = set_local_proxy(False)
+            enabled, local_enabled, _ = tp_status()
+            _state["enabled"] = enabled
+            _state["local_enabled"] = local_enabled
+            save_state()
+            if ok:
+                self.send_json({"ok": True, "enabled": enabled, "localEnabled": local_enabled, "msg": out})
+            else:
+                self.send_json({"ok": False, "enabled": enabled, "localEnabled": local_enabled, "error": out or "关闭失败"})
         elif path == "/api/config":
             # 兼容旧版
             self.send_json({
@@ -634,8 +679,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             # 重启代理（无论开关状态都重载配置）
             run_tp("stop")
             run_tp("start")
-            enabled, _ = tp_status()
+            enabled, local_enabled, _ = tp_status()
             _state["enabled"] = enabled
+            _state["local_enabled"] = local_enabled
             save_state()
             mode = "订阅模式(%d)" % len(subs) if subs else "静态节点模式"
             self.send_json({

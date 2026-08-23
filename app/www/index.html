@@ -75,10 +75,20 @@ body {
 
 /* ===== 左栏：控制台 ===== */
 .console .toggle-block {
-  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 10px 0 18px;
 }
+.switch-row {
+  display: flex; gap: 28px; align-items: flex-start;
+}
+.switch-item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.switch-name {
+  font-size: 12px; color: #94a3b8; font-weight: 600; letter-spacing: .3px;
+}
 .switch { position: relative; display: inline-block; width: 132px; height: 62px; cursor: pointer; }
+.switch.switch-sm { width: 76px; height: 40px; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider {
   position: absolute; inset: 0; border-radius: 31px;
@@ -92,12 +102,24 @@ body {
   transition: .3s;
   box-shadow: 0 3px 8px rgba(0,0,0,.4);
 }
+.switch.switch-sm .slider::before { width: 30px; height: 30px; left: 5px; top: 4px; }
 .switch input:checked + .slider {
   background: linear-gradient(135deg, #059669, #047857);
   border-color: rgba(52, 211, 153, .5);
   box-shadow: 0 0 22px rgba(5, 150, 105, .45);
 }
 .switch input:checked + .slider::before { transform: translateX(68px); background: #fff; }
+.switch.switch-sm input:checked + .slider::before { transform: translateX(36px); }
+.switch input:disabled + .slider { opacity: .45; cursor: not-allowed; }
+.switch input:checked + .slider.local-on {
+  background: linear-gradient(135deg, #0891b2, #0e7490);
+  border-color: rgba(34, 211, 238, .5);
+  box-shadow: 0 0 22px rgba(8, 145, 178, .45);
+}
+.local-hint {
+  font-size: 11px; color: #64748b; text-align: center; line-height: 1.5;
+  max-width: 260px;
+}
 .addr {
   font-family: ui-monospace, Consolas, "Courier New", monospace;
   font-size: 14px; font-weight: 600; color: #7dd3fc;
@@ -350,11 +372,24 @@ body {
     <section class="panel console">
       <h2 class="panel-title">🎛️ 控制台</h2>
       <div class="toggle-block">
-        <label class="switch">
-          <input type="checkbox" id="toggle">
-          <span class="slider"></span>
-        </label>
+        <div class="switch-row">
+          <div class="switch-item">
+            <label class="switch switch-sm">
+              <input type="checkbox" id="toggle">
+              <span class="slider"></span>
+            </label>
+            <div class="switch-name">总代理</div>
+          </div>
+          <div class="switch-item">
+            <label class="switch switch-sm">
+              <input type="checkbox" id="localToggle">
+              <span class="slider"></span>
+            </label>
+            <div class="switch-name">本机代理</div>
+          </div>
+        </div>
         <div class="addr empty" id="addr">—</div>
+        <div class="local-hint" id="localHint">本机代理关 = 本机直连，其他设备仍可用 7890 端口代理</div>
       </div>
       <div class="block">
         <div class="block-label">代理模式</div>
@@ -410,27 +445,48 @@ async function refresh() {
   try {
     const res = await fetch(API + '/api/status');
     const data = await res.json();
-    render(data.enabled, data.proxy);
+    render(data.enabled, data.proxy, data.localEnabled);
     renderMode(data.mode || 'manual');
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
 }
 
-function render(enabled, proxy) {
+function render(enabled, proxy, localEnabled) {
   const dot = document.getElementById('dot');
   const text = document.getElementById('statusText');
   const addr = document.getElementById('addr');
+  const localToggle = document.getElementById('localToggle');
+  const localHint = document.getElementById('localHint');
   dot.className = 'dot ' + (enabled ? 'on' : 'off');
-  text.textContent = enabled ? '代理已开启（全机走代理）' : '代理已关闭（直连）';
-  if (enabled) {
+  if (enabled && localEnabled) {
+    text.textContent = '代理已开启（全机走代理）';
     addr.textContent = '透明代理运行中';
     addr.className = 'addr';
+  } else if (enabled && !localEnabled) {
+    // mihomo 运行中但本机不劫持 → 其他设备可手动用 7890
+    text.textContent = '本机直连 · 其他设备可用代理';
+    addr.textContent = '7890 端口代理可用';
+    addr.className = 'addr saved';
+  } else if (!enabled && localEnabled) {
+    // 理论不出现（local 依赖 mihomo），兜底
+    text.textContent = '代理服务异常';
+    addr.textContent = '—';
+    addr.className = 'addr empty';
   } else {
+    text.textContent = '代理已关闭（直连）';
     addr.textContent = '—';
     addr.className = 'addr empty';
   }
   document.getElementById('toggle').checked = enabled;
+  if (localToggle) {
+    localToggle.checked = !!localEnabled;
+    // 总代理关时本机开关禁用；总代理开时启用
+    localToggle.disabled = !enabled;
+    localHint.textContent = enabled
+      ? '本机代理关 = 本机直连，其他设备仍可用 7890 端口代理'
+      : '总代理已关，需先开启总代理';
+  }
 }
 
 const MODE_DESC = {
@@ -885,7 +941,31 @@ document.getElementById('toggle').addEventListener('change', async (e) => {
     } else {
       setMsg('代理已关闭，恢复直连', 'info');
     }
-    render(data.enabled !== undefined ? data.enabled : !on, data.proxy);
+    render(data.enabled !== undefined ? data.enabled : !on, data.proxy, data.localEnabled);
+  } catch (err) {
+    e.target.checked = !on;
+    setMsg('❌ 无法连接服务', 'err');
+  }
+  busy = false;
+});
+
+// 本机代理开关：只开关本机透明劫持（iptables+DNS），mihomo 7890 保留给其他设备
+document.getElementById('localToggle').addEventListener('change', async (e) => {
+  if (busy) { e.target.checked = !e.target.checked; return; }
+  busy = true;
+  const on = e.target.checked;
+  setMsg(on ? '⏳ 正在开启本机代理…' : '⏳ 正在关闭本机代理（保留 7890）…', 'info');
+  try {
+    const res = await fetch(API + (on ? '/api/local/on' : '/api/local/off'), { method: 'POST' });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (data.ok) {
+      setMsg(on ? '✅ 本机代理已开启' : '✅ 本机代理已关闭，其他设备仍可用 7890', 'ok');
+    } else {
+      setMsg('❌ ' + (data.error || '操作失败'), 'err');
+      e.target.checked = !on;
+    }
+    render(data.localEnabled !== undefined ? (data.localEnabled ? true : false) : on, data.proxy, data.localEnabled);
   } catch (err) {
     e.target.checked = !on;
     setMsg('❌ 无法连接服务', 'err');
