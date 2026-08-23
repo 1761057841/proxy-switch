@@ -15,7 +15,7 @@ import json
 import os
 import sys
 
-BASE = "/vol1/@appdata/proxy-switch/transparent-proxy"
+BASE = os.environ.get("TP_BASE", "/vol1/@appdata/proxy-switch/transparent-proxy")
 STATE_FILE = os.environ.get("STATE_FILE", "/vol1/@appdata/proxy-switch/state.json")
 BASE_FILE = os.path.join(BASE, "tp-base.yaml")
 STATIC_FILE = os.path.join(BASE, "tp-static.yaml")
