@@ -701,74 +701,80 @@ class AdminHandler(BaseHTTPRequestHandler):
         u = urlparse(MIHOMO_API)
         out = {"memInuse": 0, "upTotal": 0, "downTotal": 0, "connCount": 0,
                "upSpeed": 0, "downSpeed": 0, "ok": False}
-        # 1. 内存：socket 直连读 /memory 第一条
-        try:
-            s = _sock.create_connection((u.hostname, u.port), timeout=3)
-            s.sendall(b"GET /memory HTTP/1.1\r\nHost: %s:%s\r\nAccept: */*\r\nConnection: close\r\n\r\n" % (u.hostname.encode(), str(u.port).encode()))
-            buf = b""
-            while b"\r\n\r\n" not in buf:
-                c = s.recv(4096)
-                if not c:
-                    break
-                buf += c
-            head, _, rest = buf.partition(b"\r\n\r\n")
-            chunked = b"transfer-encoding: chunked" in head.lower()
-            data = rest
-            s.settimeout(2)
-            # 读多个 chunk，取最后一个非零 inuse（第一条总是 0，统计未就绪）
-            last_inuse = 0
-            for _ in range(8):
-                # 读 chunk 大小行
-                while b"\r\n" not in data:
+
+        def _sock_read_lines(path, want):
+            """socket 直连 mihomo，读 chunked 流解码出 want 条 JSON 行"""
+            try:
+                s = _sock.create_connection((u.hostname, u.port), timeout=3)
+                s.sendall(b"GET %s HTTP/1.1\r\nHost: %s:%s\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+                          % (path.encode(), u.hostname.encode(), str(u.port).encode()))
+                buf = b""
+                while b"\r\n\r\n" not in buf:
+                    c = s.recv(4096)
+                    if not c:
+                        break
+                    buf += c
+                _, _, rest = buf.partition(b"\r\n\r\n")
+                data = rest
+                s.settimeout(2)
+                lines = []
+                while len(lines) < want:
+                    while b"\r\n" not in data:
+                        try:
+                            more = s.recv(4096)
+                        except _sock.timeout:
+                            break
+                        if not more:
+                            break
+                        data += more
+                    if b"\r\n" not in data:
+                        break
+                    size_line, _, data = data.partition(b"\r\n")
                     try:
-                        more = s.recv(4096)
-                    except _sock.timeout:
+                        size = int(size_line.split(b";")[0].strip(), 16)
+                    except Exception:
                         break
-                    if not more:
+                    if size == 0:
                         break
-                    data += more
-                if b"\r\n" not in data:
-                    break
-                size_line, _, data = data.partition(b"\r\n")
-                try:
-                    size = int(size_line.split(b";")[0].strip(), 16)
-                except Exception:
-                    break
-                if size == 0:
-                    break
-                while len(data) < size + 2:
+                    while len(data) < size + 2:
+                        try:
+                            more = s.recv(4096)
+                        except _sock.timeout:
+                            break
+                        if not more:
+                            break
+                        data += more
+                    if len(data) < size + 2:
+                        break
+                    payload = data[:size]
+                    data = data[size + 2:]
                     try:
-                        more = s.recv(4096)
-                    except _sock.timeout:
-                        break
-                    if not more:
-                        break
-                    data += more
-                if len(data) < size + 2:
-                    break
-                payload = data[:size]
-                data = data[size + 2:]
-                try:
-                    m = _json.loads(payload)
-                    v = int(m.get("inuse", 0))
-                    if v > 0:
-                        last_inuse = v
-                except Exception:
-                    pass
-            out["memInuse"] = last_inuse
-            s.close()
-        except Exception:
-            pass
-        # 2. 连接汇总：GET /connections 普通 JSON
+                        lines.append(_json.loads(payload))
+                    except Exception:
+                        pass
+                s.close()
+                return lines
+            except Exception:
+                return []
+
+        # 1. 内存：/memory 流读多条，取最后一个非零 inuse（第一条总是 0，统计未就绪）
+        for m in _sock_read_lines("/memory", 8):
+            v = int(m.get("inuse", 0) or 0)
+            if v > 0:
+                out["memInuse"] = v
+
+        # 2. 流量总量：/traffic 流读 2 条（进程级累计 upTotal/downTotal，稳定不跳变）
+        for t in _sock_read_lines("/traffic", 2):
+            out["upTotal"] = int(t.get("upTotal", 0) or 0)
+            out["downTotal"] = int(t.get("downTotal", 0) or 0)
+            out["ok"] = True
+
+        # 3. 连接数：GET /connections 普通 JSON
         try:
             req = urllib.request.Request(MIHOMO_API + "/connections")
             resp = urllib.request.urlopen(req, timeout=5)
             d = _json.loads(resp.read().decode("utf-8"))
-            cs = d.get("connections", [])
-            out["connCount"] = len(cs)
-            out["upTotal"] = sum(int(c.get("upload", 0) or 0) for c in cs)
-            out["downTotal"] = sum(int(c.get("download", 0) or 0) for c in cs)
-            out["ok"] = True
+            out["connCount"] = len(d.get("connections", []))
         except Exception:
             pass
         # 3. 速率：基于上次快照
