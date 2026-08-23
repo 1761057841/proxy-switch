@@ -169,6 +169,17 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path.startswith("/panel/"):
             self.proxy_mihomo()
         elif path == "/api/proxy/on":
+            # 先确保配置已生成（有订阅拉取 / 无订阅静态），再启动
+            sub = (get_subscription() or "").strip()
+            args = ["python3", GEN_SCRIPT, sub] if sub else ["python3", GEN_SCRIPT, "--clear"]
+            try:
+                g = subprocess.run(args, capture_output=True, text=True, timeout=30)
+                if g.returncode != 0:
+                    self.send_json({"enabled": False, "proxy": "", "error": (g.stderr or g.stdout or "生成配置失败").strip()})
+                    return
+            except Exception as e:
+                self.send_json({"enabled": False, "proxy": "", "error": str(e)})
+                return
             ok, out = run_tp("start")
             enabled, _ = tp_status()
             _state["enabled"] = enabled
@@ -226,7 +237,7 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path.startswith(GATEWAY_PREFIX):
             path = path[len(GATEWAY_PREFIX):]
         if path.startswith("/panel/"):
-            target = MIHOMO_API + path[len("/panel/"):]
+            target = MIHOMO_API + "/" + path[len("/panel/"):]
             if "?" in self.path:
                 target += "?" + self.path.split("?", 1)[1]
         else:
