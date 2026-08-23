@@ -159,6 +159,34 @@ body {
   font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.5;
   min-height: 18px;
 }
+.mode-now {
+  font-size: 12.5px; color: #7dd3fc; margin-top: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(56, 189, 248, .08);
+  border: 1px solid rgba(56, 189, 248, .18);
+  font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mode-now .now-node {
+  color: #e2e8f0; font-weight: 700;
+}
+.now-ms {
+  display: inline-block; margin-left: 8px;
+  padding: 1px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700;
+  vertical-align: 1px;
+}
+.now-ms.good { color: #4ade80; background: rgba(74, 222, 128, .12); }
+.now-ms.mid  { color: #fbbf24; background: rgba(251, 191, 36, .12); }
+.now-ms.bad  { color: #f87171; background: rgba(248, 113, 113, .12); }
+.now-ms.na   { color: #94a3b8; background: rgba(148, 163, 184, .1); }
+.mode-speed {
+  font-size: 12.5px; color: #94a3b8; margin-top: 6px;
+  font-family: ui-monospace, Consolas, monospace;
+  display: flex; gap: 14px;
+}
+.mode-speed .sp-up { color: #38bdf8; }
+.mode-speed .sp-down { color: #34d399; }
 .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .test-btn {
   padding: 12px 10px;
@@ -550,6 +578,7 @@ body {
           <button class="mode-btn" data-mode="fallback" type="button" title="节点故障时自动切换下一个">🔁 故障转移</button>
         </div>
         <div class="mode-desc" id="modeDesc"></div>
+        <div class="mode-now" id="modeNow" title="当前实际连接的节点">当前节点：—</div>
       </div>
       <div class="block">
         <div class="block-label">操作</div>
@@ -705,10 +734,55 @@ function renderMode(mode) {
   });
   const desc = document.getElementById('modeDesc');
   if (desc) desc.textContent = MODE_DESC[currentMode] || '';
+  loadModeNow(true);
   // 模式变化后，刷新已展开的卡片节点列表（跟着模式变）
   document.querySelectorAll('.sub-item').forEach(it => {
     if (it.querySelector('.sub-nodes').style.display === 'block') renderNodes(it);
   });
+}
+
+async function loadModeNow(forceDelay) {
+  // 获取当前模式对应组的 now 节点 + 其延迟（毫秒）
+  // forceDelay=true 时强制组测速（仅页面加载/模式切换时调用，避免 3s 高频测速）
+  try {
+    const group = modeGroup();
+    const res = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(group));
+    if (!res.ok) return;
+    const d = await res.json();
+    const now = d && d.now;
+    const el = document.getElementById('modeNow');
+    if (!el) return;
+    if (now) {
+      el.innerHTML = '当前节点：<span class="now-node">' + now + '</span>';
+      el.title = '当前实际连接的节点（' + group + ' 组）';
+      // 查延迟：优先测速缓存，没有且 forceDelay 时才组测速
+      let ms = null;
+      if (window.pxDelays && pxDelays[now] !== undefined) {
+        ms = pxDelays[now];
+      } else if (forceDelay) {
+        try {
+          const dr = await fetch(API + '/api/mihomo/group/' + encodeURIComponent(group) + '/delay?url=' + encodeURIComponent('http://www.gstatic.com/generate_204') + '&timeout=5000');
+          const dd = await dr.json();
+          if (dd && dd[now] !== undefined) ms = dd[now];
+          else if (dd && dd.delay !== undefined) ms = dd.delay;
+          // 测速结果入缓存，供节点列表共用
+          if (dd && typeof dd === 'object') {
+            if (!window.pxDelays) window.pxDelays = {};
+            Object.assign(window.pxDelays, dd);
+          }
+        } catch (e) {}
+      }
+      const msEl = el.querySelector('.now-ms');
+      if (msEl) {
+        msEl.className = 'now-ms ' + delayClass(ms);
+        msEl.textContent = ms + ' ms';
+      } else if (ms !== null && ms !== undefined) {
+        el.insertAdjacentHTML('beforeend', ' <span class="now-ms ' + delayClass(ms) + '">' + ms + ' ms</span>');
+      }
+    } else {
+      el.textContent = '当前节点：—';
+    }
+  } catch (e) {}
 }
 
 async function switchMode(mode) {
@@ -1333,8 +1407,8 @@ async function togglePort(port) {
 // 连接面板事件
 document.getElementById('connRefreshBtn').addEventListener('click', loadConnections);
 document.getElementById('connCloseBtn').addEventListener('click', closeAllConnections);
-// 每 3 秒自动刷新连接列表
-connTimer = setInterval(loadConnections, 3000);
+// 每 3 秒自动刷新连接列表（同时刷新当前节点显示）
+connTimer = setInterval(() => { loadConnections(); loadModeNow(); }, 3000);
 // 每 2 秒刷新实时统计
 loadStats();
 statsTimer = setInterval(loadStats, 2000);
