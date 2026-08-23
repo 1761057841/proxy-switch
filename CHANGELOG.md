@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.7.1 (2026-08-23)
+
+**修复**
+- 面板黑屏问题（多个根因）：
+  - API 代理路径从 `/panel/*` 改为 `/api/mihomo/*`（网关对 `/api/` 前缀带登录 cookie 正常放行）
+  - 禁用 MetaCubeXD service worker 缓存（sw.js 空壳 + 静态资源 no-store），避免浏览器加载旧版页面
+  - 修复后端 proxy_mihomo URL 拼接缺 `/` 的问题
+- 面板改回新窗口打开（window.open），不再内嵌 iframe
+
 ## v2.7.0 (2026-08-23)
 
 **新功能**
