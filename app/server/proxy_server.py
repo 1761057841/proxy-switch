@@ -101,6 +101,67 @@ def get_subscriptions():
     return out
 
 
+# ---------------------------------------------------------------- 订阅状态（卡片展示）
+
+import re
+
+
+def get_provider_status():
+    """返回每个订阅的完整状态：节点数 / 流量 / 到期 / 更新时间 / 重置
+    数据来源：
+      - 节点数、updatedAt：mihomo API /providers/proxies/{name}
+      - 流量、到期、重置：解析 provider 文件里的伪节点名（机场自带信息）
+    """
+    subs = get_subscriptions()
+    tp_dir = os.path.dirname(GEN_SCRIPT)
+    providers_dir = os.path.join(tp_dir, "providers")
+    out = []
+    for i, s in enumerate(subs, 1):
+        pname = "airport%d" % i
+        st = {"name": s["name"], "provider": pname, "url": s["url"],
+              "nodeCount": 0, "updatedAt": "", "traffic": "", "expire": "", "reset": ""}
+        # 节点数 + 更新时间（mihomo API）
+        try:
+            req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname)
+            resp = urllib.request.urlopen(req, timeout=5)
+            d = json.loads(resp.read().decode("utf-8"))
+            st["nodeCount"] = len(d.get("proxies", []))
+            st["updatedAt"] = (d.get("updatedAt") or "")[:19].replace("T", " ")
+        except Exception:
+            pass
+        # 流量 / 到期 / 重置（解析 provider 文件伪节点名）
+        pfile = os.path.join(providers_dir, pname + ".yaml")
+        try:
+            with open(pfile, encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            m = re.search(r"剩余流量[：:]\s*([0-9.]+\s*[A-Za-z]+)", content)
+            if m:
+                st["traffic"] = m.group(1).strip()
+            m = re.search(r"套餐到期[：:]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", content)
+            if m:
+                st["expire"] = m.group(1)
+            m = re.search(r"距离下次重置剩余[：:]\s*([0-9]+\s*天)", content)
+            if m:
+                st["reset"] = m.group(1)
+        except Exception:
+            pass
+        out.append(st)
+    return out
+
+
+def refresh_provider(pname):
+    """调用 mihomo 刷新指定 provider，返回 (ok, msg)"""
+    try:
+        req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname, method="PUT")
+        resp = urllib.request.urlopen(req, timeout=30)
+        resp.read()
+        return True, "刷新成功"
+    except urllib.error.HTTPError as e:
+        return False, "刷新失败（HTTP %d），可能是机场限流或网络问题" % e.code
+    except Exception as e:
+        return False, "刷新失败：%s" % str(e)[:100]
+
+
 def run_tp(action):
     """调用 tp.sh，返回 (ok, output)"""
     try:
@@ -186,6 +247,10 @@ class AdminHandler(BaseHTTPRequestHandler):
             })
         elif path == "/api/subscription":
             self.send_json({"ok": True, "subscriptions": get_subscriptions()})
+        elif path == "/api/subscriptions/status":
+            self.send_json({"ok": True, "subscriptions": get_provider_status()})
+        elif path == "/api/subscriptions/refresh":
+            self.send_json({"ok": False, "error": "请使用 POST"}, status=405)
         elif path.startswith("/metacubexd"):
             self.serve_metacubexd(path)
         elif path in ("/", "/index.html"):
@@ -236,6 +301,20 @@ class AdminHandler(BaseHTTPRequestHandler):
             })
         elif path == "/api/test":
             self.send_json(test_proxy_connectivity())
+        elif path == "/api/subscriptions/refresh":
+            # 刷新单个订阅（provider）
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length).decode("utf-8") if length else ""
+                body = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                body = {}
+            pname = (body.get("provider") or "").strip()
+            if not pname:
+                self.send_json({"ok": False, "error": "缺少 provider 参数"})
+                return
+            ok, msg = refresh_provider(pname)
+            self.send_json({"ok": ok, "msg": msg})
         elif path == "/api/subscription":
             self.handle_subscription()
         else:
