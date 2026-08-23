@@ -3,7 +3,7 @@
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
 
-export PATH=/var/apps/python312/target/bin:$PATH
+# 使用系统自带 python3（无需 python312 依赖）
 
 APP_DIR="${TRIM_APPDEST}/server"
 SOCKET_PATH="${TRIM_APPDEST}/app.sock"
