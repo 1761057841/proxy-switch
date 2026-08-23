@@ -138,7 +138,7 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.route_path()
-        if path.startswith("/panel/"):
+        if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         elif path == "/api/status":
             enabled, _ = tp_status()
@@ -166,7 +166,7 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.route_path()
-        if path.startswith("/panel/"):
+        if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         elif path == "/api/proxy/on":
             # 先确保配置已生成（有订阅拉取 / 无订阅静态），再启动
@@ -210,21 +210,21 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = self.route_path()
-        if path.startswith("/panel/"):
+        if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         else:
             self.send_error(404)
 
     def do_DELETE(self):
         path = self.route_path()
-        if path.startswith("/panel/"):
+        if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         else:
             self.send_error(404)
 
     def do_PATCH(self):
         path = self.route_path()
-        if path.startswith("/panel/"):
+        if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
         else:
             self.send_error(404)
@@ -232,12 +232,12 @@ class AdminHandler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ MetaCubeXD
 
     def proxy_mihomo(self):
-        """将 /panel/* 请求代理到 mihomo external-controller(127.0.0.1:9090)"""
+        """将 /api/mihomo/* 请求代理到 mihomo external-controller(127.0.0.1:9090)"""
         path = self.path.split("?", 1)[0]
         if path.startswith(GATEWAY_PREFIX):
             path = path[len(GATEWAY_PREFIX):]
-        if path.startswith("/panel/"):
-            target = MIHOMO_API + "/" + path[len("/panel/"):]
+        if path.startswith("/api/mihomo/"):
+            target = MIHOMO_API + "/" + path[len("/api/mihomo/"):]
             if "?" in self.path:
                 target += "?" + self.path.split("?", 1)[1]
         else:
@@ -307,6 +307,7 @@ class AdminHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -370,7 +371,13 @@ class AdminHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, *args):
-        pass
+        # 记录每个请求到 access.log（排查网关转发问题）
+        try:
+            import datetime
+            with open(os.path.join(os.path.dirname(STATE_FILE), "access.log"), "a") as f:
+                f.write("%s %s %s\n" % (datetime.datetime.now().strftime("%H:%M:%S"), self.command, self.path))
+        except Exception:
+            pass
 
 
 class UnixHTTPServer(ThreadingUnixStreamServer):

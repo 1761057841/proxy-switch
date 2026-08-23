@@ -1,4 +1,4 @@
 window.__METACUBEXD_CONFIG__ = {
-  defaultBackendURL: '/app/proxy-switch/api/mihomo/',
+  defaultBackendURL: '/app/proxy-switch/panel/',
   githubToken: '',
 }
