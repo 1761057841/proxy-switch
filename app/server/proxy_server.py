@@ -104,13 +104,51 @@ def get_subscriptions():
 # ---------------------------------------------------------------- 订阅状态（卡片展示）
 
 import re
+import time as _time
+
+# 订阅 userinfo 缓存：{url: (timestamp, {total/used/expire})}，避免频繁请求机场被限流
+_userinfo_cache = {}
+_USERINFO_TTL = 300  # 5 分钟
+
+
+def fetch_userinfo(url):
+    """请求订阅 URL 响应头 subscription-userinfo，带缓存（5 分钟）"""
+    now = _time.time()
+    if url in _userinfo_cache:
+        ts, data = _userinfo_cache[url]
+        if now - ts < _USERINFO_TTL and data is not None:
+            return data
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "clash-verge/v2.0.0"})
+        # 空代理直连：绕过 mihomo 代理（机场对代理 IP 限流），直连反而更快
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        resp = opener.open(req, timeout=8)
+        hdr = resp.headers.get("subscription-userinfo") or ""
+        info = {}
+        for part in hdr.split(";"):
+            part = part.strip()
+            if "=" in part:
+                k, v = part.split("=", 1)
+                info[k.strip().lower()] = v.strip()
+        data = {
+            "total": int(info.get("total") or 0),
+            "upload": int(info.get("upload") or 0),
+            "download": int(info.get("download") or 0),
+            "expire": int(info.get("expire") or 0),
+        }
+        _userinfo_cache[url] = (now, data)
+        return data
+    except Exception:
+        # 失败不缓存（下次再试），但记录失败时间避免连续打机场
+        _userinfo_cache[url] = (now, None)
+        return None
 
 
 def get_provider_status():
-    """返回每个订阅的完整状态：节点数 / 流量 / 到期 / 更新时间 / 重置
+    """返回每个订阅的完整状态：节点数 / 流量(已用/总量) / 到期 / 更新时间 / 重置
     数据来源：
       - 节点数、updatedAt：mihomo API /providers/proxies/{name}
-      - 流量、到期、重置：解析 provider 文件里的伪节点名（机场自带信息）
+      - 流量、到期、重置：订阅响应头 subscription-userinfo（标准字段）+ provider 文件伪节点名兜底
     """
     subs = get_subscriptions()
     tp_dir = os.path.dirname(GEN_SCRIPT)
@@ -119,7 +157,8 @@ def get_provider_status():
     for i, s in enumerate(subs, 1):
         pname = "airport%d" % i
         st = {"name": s["name"], "provider": pname, "url": s["url"],
-              "nodeCount": 0, "updatedAt": "", "traffic": "", "expire": "", "reset": ""}
+              "nodeCount": 0, "updatedAt": "", "traffic": "", "expire": "", "reset": "",
+              "trafficUsed": "", "trafficTotal": "", "usedPct": 0}
         # 节点数 + 更新时间（mihomo API）
         try:
             req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname)
@@ -129,28 +168,51 @@ def get_provider_status():
             st["updatedAt"] = (d.get("updatedAt") or "")[:19].replace("T", " ")
         except Exception:
             pass
-        # 流量 / 到期 / 重置（解析 provider 文件伪节点名）
-        pfile = os.path.join(providers_dir, pname + ".yaml")
-        try:
-            with open(pfile, encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-            m = re.search(r"剩余流量[：:]\s*([0-9.]+\s*[A-Za-z]+)", content)
-            if m:
-                st["traffic"] = m.group(1).strip()
-            m = re.search(r"套餐到期[：:]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", content)
-            if m:
-                st["expire"] = m.group(1)
-            m = re.search(r"距离下次重置剩余[：:]\s*([0-9]+\s*天)", content)
-            if m:
-                st["reset"] = m.group(1)
-        except Exception:
-            pass
+        # 订阅响应头 subscription-userinfo（总量/已用/到期，带缓存）
+        info = fetch_userinfo(s["url"])
+        if info and info.get("total"):
+            used = info["upload"] + info["download"]
+            st["trafficTotal"] = fmt_bytes(info["total"])
+            st["trafficUsed"] = fmt_bytes(used)
+            st["usedPct"] = round(used / info["total"] * 100, 1)
+            st["traffic"] = fmt_bytes(info["total"] - used)  # 剩余 = 总量 - 已用
+            if info.get("expire"):
+                import datetime
+                st["expire"] = datetime.datetime.fromtimestamp(info["expire"]).strftime("%Y-%m-%d")
+        # 兜底：解析 provider 文件伪节点名（机场无 userinfo 头时）
+        if not st["traffic"] and not st["trafficTotal"]:
+            pfile = os.path.join(providers_dir, pname + ".yaml")
+            try:
+                with open(pfile, encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                m = re.search(r"剩余流量[：:]\s*([0-9.]+\s*[A-Za-z]+)", content)
+                if m:
+                    st["traffic"] = m.group(1).strip()
+                m = re.search(r"套餐到期[：:]\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", content)
+                if m:
+                    st["expire"] = m.group(1)
+                m = re.search(r"距离下次重置剩余[：:]\s*([0-9]+\s*天)", content)
+                if m:
+                    st["reset"] = m.group(1)
+            except Exception:
+                pass
         out.append(st)
     return out
 
 
+def fmt_bytes(n):
+    """字节数转可读字符串"""
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return "%.2f %s" % (n, unit) if unit != "B" else "%d B" % n
+        n /= 1024
+
+
 def refresh_provider(pname):
     """调用 mihomo 刷新指定 provider，返回 (ok, msg)"""
+    # 刷新后清 userinfo 缓存，重新拉取最新流量
+    _userinfo_cache.clear()
     try:
         req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname, method="PUT")
         resp = urllib.request.urlopen(req, timeout=30)

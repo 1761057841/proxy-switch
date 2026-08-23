@@ -295,13 +295,20 @@ function renderSubList() {
     subList.innerHTML = '<div class="sub-hint" style="padding:6px 0">暂无订阅，点击「➕ 添加订阅」填入机场链接（可多个）。</div>';
     return;
   }
-  subs.forEach((s, i) => {
+    subs.forEach((s, i) => {
     const st = subStatus['airport' + (i + 1)] || {};
     const item = document.createElement('div');
     item.className = 'sub-item';
-    // 流量进度条宽度（参考 200GB 满）
-    const mb = trafficToNum(st.traffic);
-    const pct = mb ? Math.min(100, Math.round(mb / (200 * 1024) * 100)) : 0;
+    // 流量进度条：已用百分比（有 total 用 usedPct，否则按剩余估算）
+    let pct = st.usedPct || 0;
+    if (!st.trafficTotal) {
+      const mb = trafficToNum(st.traffic);
+      pct = mb ? Math.min(100, Math.round(mb / (200 * 1024) * 100)) : 0;
+    }
+    // 流量主显示：已用 / 总量（如 14.9 GiB / 102 GiB）；无总量时显示剩余
+    const trafficMain = st.trafficTotal
+      ? (st.trafficUsed || '—') + ' / ' + st.trafficTotal
+      : (st.traffic || '—');
     const upd = st.updatedAt ? ('更新于 ' + timeAgo(st.updatedAt)) : '未更新';
     item.innerHTML =
       '<div class="sub-card-top">' +
@@ -314,8 +321,8 @@ function renderSubList() {
       '</div>' +
       '<div class="sub-card-mid">' +
         '<div>' +
-          '<div class="sub-traffic-big">' + (st.traffic || '—') + '</div>' +
-          '<div class="sub-traffic-label">剩余流量</div>' +
+          '<div class="sub-traffic-big">' + esc(trafficMain) + '</div>' +
+          '<div class="sub-traffic-label">' + (st.trafficTotal ? '已用 / 总流量' : '剩余流量') + '</div>' +
         '</div>' +
         '<div class="sub-traffic-bar"><div class="sub-traffic-fill" style="width:' + pct + '%"></div></div>' +
       '</div>' +
