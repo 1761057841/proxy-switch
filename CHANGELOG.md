@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.12.0 (2026-08-23)
+
+**新功能：代理模式切换（方案B）**
+
+- 代理状态区新增模式切换按钮组：🔧 手动 / ⚡ 自动选择 / 🔁 故障转移
+  - **手动**：流量走 PROXY 组，点哪个节点用哪个（默认）
+  - **自动选择**：url-test 自动测速，始终用延迟最低的节点，无需手动管
+  - **故障转移**：fallback 按顺序用节点，挂了自动切下一个
+- 实现机制：修改 tp-config.yaml 的 `MATCH` 规则行指向目标组 + mihomo API 热重载（`PUT /configs?force=true`，不重启进程，规则即时生效）
+- 新增 API：`GET /api/mode`（读当前模式）、`POST /api/mode`（切换，body `{"mode":"manual|auto|fallback"}`）
+- 模式存 state.json（`mode` 字段），/api/status 返回当前模式
+- 前端：三按钮胶囊高亮当前模式 + 模式说明文字；切换成功/失败提示
+
+**技术细节**
+- 热重载：`PUT http://127.0.0.1:9090/configs?force=true` + body `{"path": "tp-config.yaml路径"}` → 204
+- 自动选择/故障转移组在 gen_config.py 中已生成（url-test/fallback，use 全部 provider），模式切换只改 MATCH 行指向
+- 实测：auto 模式 URLTest 自动选台湾专线（当时最低延迟），PROXY 组手动选择不受影响；YouTube 200
+
 ## v2.11.1 (2026-08-23)
 
 **修复：页面一直「加载中…」崩溃**

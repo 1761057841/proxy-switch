@@ -46,6 +46,23 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .addr.empty { color: #64748b; }
 .addr.saved { color: #fbbf24; border-style: solid; }
+.mode-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 14px; padding: 10px; background: rgba(15, 23, 42, .5);
+  border-radius: 10px;
+}
+.mode-label { font-size: 13px; color: #94a3b8; margin-right: 2px; }
+.mode-btn {
+  background: #1e293b; color: #cbd5e1; border: 1px solid #334155;
+  border-radius: 999px; padding: 6px 14px; font-size: 13px;
+  cursor: pointer; transition: all .2s;
+}
+.mode-btn:hover { border-color: #38bdf8; color: #7dd3fc; }
+.mode-btn.active {
+  background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #7dd3fc;
+  box-shadow: 0 0 8px rgba(56, 189, 248, .35);
+}
+.mode-desc { font-size: 12px; color: #64748b; margin-left: 4px; flex-basis: 100%; }
 .switch {
   position: relative; display: inline-block; width: 120px; height: 56px; cursor: pointer;
 }
@@ -208,6 +225,13 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 
   <div class="config">
     <h2>⚙️ 代理状态</h2>
+    <div class="mode-row" id="modeRow">
+      <span class="mode-label">模式：</span>
+      <button class="mode-btn" data-mode="manual" type="button" title="手动选择节点">🔧 手动</button>
+      <button class="mode-btn" data-mode="auto" type="button" title="自动选延迟最低的节点">⚡ 自动选择</button>
+      <button class="mode-btn" data-mode="fallback" type="button" title="节点故障时自动切换下一个">🔁 故障转移</button>
+      <span class="mode-desc" id="modeDesc"></span>
+    </div>
     <div class="btn-row">
       <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
       <button class="test-btn" id="panelBtn" type="button" onclick="window.open(API + '/metacubexd/?v=20260823-1352', '_blank')">📊 节点面板</button>
@@ -245,6 +269,7 @@ async function refresh() {
     const res = await fetch(API + '/api/status');
     const data = await res.json();
     render(data.enabled, data.proxy);
+    renderMode(data.mode || 'manual');
   } catch (e) {
     document.getElementById('statusText').textContent = '无法连接服务';
   }
@@ -264,6 +289,47 @@ function render(enabled, proxy) {
     addr.className = 'addr empty';
   }
   document.getElementById('toggle').checked = enabled;
+}
+
+const MODE_DESC = {
+  manual: '手动：流量走 PROXY 组，点哪个节点用哪个',
+  auto: '自动选择：自动测速，始终用延迟最低的节点',
+  fallback: '故障转移：按顺序用节点，挂了自动切下一个',
+};
+
+function renderMode(mode) {
+  currentMode = mode || 'manual';
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === currentMode);
+  });
+  const desc = document.getElementById('modeDesc');
+  if (desc) desc.textContent = MODE_DESC[currentMode] || '';
+  // 模式变化后，刷新已展开的卡片节点列表（跟着模式变）
+  document.querySelectorAll('.sub-item').forEach(it => {
+    if (it.querySelector('.sub-nodes').style.display === 'block') renderNodes(it);
+  });
+}
+
+async function switchMode(mode) {
+  const btns = document.querySelectorAll('.mode-btn');
+  btns.forEach(b => b.disabled = true);
+  try {
+    const res = await fetch(API + '/api/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      renderMode(data.mode);
+      setMsg('✅ ' + (data.msg || '已切换模式'), 'ok');
+    } else {
+      setMsg('❌ ' + (data.error || data.msg || '切换失败'), 'err');
+    }
+  } catch (err) {
+    setMsg('❌ 无法连接服务', 'err');
+  }
+  btns.forEach(b => b.disabled = false);
 }
 
 function setMsg(text, type) {
@@ -292,6 +358,9 @@ async function testConfig() {
 }
 
 document.getElementById('testBtn').addEventListener('click', testConfig);
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
 
 
 // ---- 订阅设置（多订阅卡片 + 状态信息）----
@@ -419,6 +488,14 @@ function renderSubList() {
 
 // ---- 节点展开 / 测速 / 切换（内嵌卡片）----
 let pxDelays = {};      // 节点名 -> 延迟ms
+let currentMode = 'manual';   // manual/auto/fallback
+
+// 当前模式对应的策略组名
+function modeGroup() {
+  if (currentMode === 'auto') return '自动选择';
+  if (currentMode === 'fallback') return '故障转移';
+  return 'PROXY';
+}
 
 function delayClass(ms) {
   if (ms === undefined || ms === null) return 'na';
@@ -430,7 +507,8 @@ function delayClass(ms) {
 async function toggleNodes(item) {
   const nodesEl = item.querySelector('.sub-nodes');
   const btn = item.querySelector('[data-act=expand]');
-  const isOpen = nodesEl.style.display !== 'none';
+  // 初始 style.display 为空字符串，显式判断 === 'block' 避免"点两下才展开"
+  const isOpen = nodesEl.style.display === 'block';
   if (isOpen) {
     nodesEl.style.display = 'none';
     btn.classList.remove('open');
@@ -445,13 +523,16 @@ async function renderNodes(item) {
   const provider = item.dataset.provider;
   const grid = item.querySelector('.sub-nodes .px-grid');
   const head = item.querySelector('.sub-nodes-head');
+  const groupTab = head.querySelector('.px-group-tab');
   const lastSpan = head.querySelector('span:last-child');
+  const grp = modeGroup();
+  if (groupTab) groupTab.textContent = grp + ' · 点击节点切换';
   grid.innerHTML = '';
   // 从 mihomo API 拿该 provider 的节点 + 当前选中 + 延迟（若有测速）
   try {
     const [r1, r2] = await Promise.all([
       fetch(API + '/api/mihomo/providers/proxies/' + provider),
-      fetch(API + '/api/mihomo/proxies/PROXY')
+      fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(grp))
     ]);
     const d1 = await r1.json();
     const d2 = await r2.json();
@@ -482,26 +563,27 @@ async function renderNodes(item) {
 }
 
 async function switchNode(item, node) {
+  const grp = modeGroup();
   // 当前选中
   let now = '';
   try {
-    const r = await fetch(API + '/api/mihomo/proxies/PROXY');
+    const r = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(grp));
     const d = await r.json();
     now = d.now || '';
   } catch (e) {}
   if (node === now) return;
   setSubMsg('⏳ 切换到 ' + node + ' …', 'info');
   try {
-    const res = await fetch(API + '/api/mihomo/proxies/PROXY', {
+    const res = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(grp), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: node })
     });
     if (res.status === 204 || res.ok) {
-      setSubMsg('✅ 已切换到 ' + node, 'ok');
+      setSubMsg('✅ 已切换到 ' + node + '（' + grp + '）', 'ok');
       // 重新渲染展开的卡片节点（高亮更新）
       document.querySelectorAll('.sub-item').forEach(it => {
-        if (it.querySelector('.sub-nodes').style.display !== 'none') renderNodes(it);
+        if (it.querySelector('.sub-nodes').style.display === 'block') renderNodes(it);
       });
     } else {
       let d = {}; try { d = await res.json(); } catch (e) {}
@@ -516,16 +598,17 @@ async function testAllDelay(i, item) {
   const btn = item.querySelector('[data-act=speed]');
   btn.disabled = true;
   btn.textContent = '…';
+  const grp = modeGroup();
   setSubMsg('⚡ 正在测试全部节点延迟…（约 10-30 秒）', 'info');
   try {
     const url = encodeURIComponent('http://www.gstatic.com/generate_204');
-    const res = await fetch(API + '/api/mihomo/group/PROXY/delay?url=' + url + '&timeout=5000');
+    const res = await fetch(API + '/api/mihomo/group/' + encodeURIComponent(grp) + '/delay?url=' + url + '&timeout=5000');
     const d = await res.json();
     pxDelays = d || {};
-    setSubMsg('✅ 测速完成，共 ' + Object.keys(pxDelays).length + ' 个节点', 'ok');
+    setSubMsg('✅ 测速完成，共 ' + Object.keys(pxDelays).length + ' 个节点（' + grp + '）', 'ok');
     // 刷新所有展开卡片的节点延迟
     document.querySelectorAll('.sub-item').forEach(it => {
-      if (it.querySelector('.sub-nodes').style.display !== 'none') renderNodes(it);
+      if (it.querySelector('.sub-nodes').style.display === 'block') renderNodes(it);
     });
   } catch (e) {
     setSubMsg('❌ 测速失败：' + (e.message || '无法连接服务'), 'err');
@@ -540,15 +623,22 @@ function esc(v) {
 
 async function loadSub() {
   try {
-    const [r1, r2] = await Promise.all([
-      fetch(API + '/api/subscription'),
-      fetch(API + '/api/subscriptions/status')
-    ]);
+    // 第一步：先拿订阅列表（快），立即渲染卡片，避免等慢的 status
+    const r1 = await fetch(API + '/api/subscription');
     const d1 = await r1.json();
-    const d2 = await r2.json();
     if (Array.isArray(d1.subscriptions)) {
       subs = d1.subscriptions.map(s => ({ name: s.name || '', url: s.url || '' }));
     }
+    renderSubList();
+    // 第二步：异步拿流量/到期等状态（含 userinfo 请求，可能慢），回来后更新卡片
+    refreshStatus();
+  } catch (e) {}
+}
+
+async function refreshStatus() {
+  try {
+    const r2 = await fetch(API + '/api/subscriptions/status');
+    const d2 = await r2.json();
     subStatus = {};
     if (Array.isArray(d2.subscriptions)) {
       d2.subscriptions.forEach(s => { if (s.provider) subStatus[s.provider] = s; });

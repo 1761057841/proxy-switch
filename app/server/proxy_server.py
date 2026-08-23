@@ -45,8 +45,14 @@ MIHOMO_API = "http://127.0.0.1:9090"
 # 透明代理脚本
 TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/tp.sh")
 GEN_SCRIPT = os.environ.get("GEN_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/gen_config.py")
+TP_DIR = os.path.dirname(TP_SCRIPT)
+TP_CONFIG = os.path.join(TP_DIR, "tp-config.yaml")
 
-_state = {"enabled": False, "subscriptions": []}
+# 代理模式：规则 MATCH 行指向的组名
+# manual → PROXY（手动选节点）; auto → 自动选择（url-test 最低延迟）; fallback → 故障转移
+MODE_GROUPS = {"manual": "PROXY", "auto": "自动选择", "fallback": "故障转移"}
+
+_state = {"enabled": False, "subscriptions": [], "mode": "manual"}
 
 
 def load_state():
@@ -57,6 +63,9 @@ def load_state():
     except Exception:
         _state = {"enabled": False, "subscriptions": []}
     _state.setdefault("enabled", False)
+    _state.setdefault("mode", "manual")
+    if _state.get("mode") not in MODE_GROUPS:
+        _state["mode"] = "manual"
     # 多订阅支持：优先 subscriptions 数组，兼容旧 subscription 字符串
     if "subscriptions" not in _state:
         _state["subscriptions"] = []
@@ -108,15 +117,17 @@ import time as _time
 
 # 订阅 userinfo 缓存：{url: (timestamp, {total/used/expire})}，避免频繁请求机场被限流
 _userinfo_cache = {}
-_USERINFO_TTL = 300  # 5 分钟
+_USERINFO_TTL = 1800  # 30 分钟（成功数据）
+_USERINFO_FAIL_TTL = 60  # 失败后 60 秒内不重试
 
 
 def fetch_userinfo(url):
-    """请求订阅 URL 响应头 subscription-userinfo，带缓存（5 分钟）"""
+    """请求订阅 URL 响应头 subscription-userinfo，带缓存（成功 30 分钟 / 失败 60 秒）"""
     now = _time.time()
     if url in _userinfo_cache:
         ts, data = _userinfo_cache[url]
-        if now - ts < _USERINFO_TTL and data is not None:
+        ttl = _USERINFO_TTL if data is not None else _USERINFO_FAIL_TTL
+        if now - ts < ttl:
             return data
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "clash-verge/v2.0.0"})
@@ -246,6 +257,62 @@ def tp_status():
         return False, ""
 
 
+def get_mode():
+    """读取当前代理模式（manual/auto/fallback）"""
+    mode = _state.get("mode") or "manual"
+    if mode not in MODE_GROUPS:
+        mode = "manual"
+    return mode
+
+
+def set_mode(mode):
+    """切换代理模式：改 tp-config.yaml 的 MATCH 行 → mihomo 热重载
+    返回 (ok, msg)
+    """
+    if mode not in MODE_GROUPS:
+        return False, "未知模式: %s" % mode
+    if not os.path.exists(TP_CONFIG):
+        return False, "配置文件不存在: %s" % TP_CONFIG
+    try:
+        with open(TP_CONFIG, "r", encoding="utf-8") as f:
+            cfg = f.read()
+    except Exception as e:
+        return False, "读取配置失败: %s" % e
+    import re
+    # 替换 MATCH 行（最后一个规则）指向目标组
+    new_cfg, n = re.subn(r"(?m)^(\s*-\s*'MATCH,)[^']*'",
+                         r"\g<1>%s'" % MODE_GROUPS[mode],
+                         cfg)
+    if n == 0:
+        return False, "配置中未找到 MATCH 规则行"
+    try:
+        with open(TP_CONFIG, "w", encoding="utf-8") as f:
+            f.write(new_cfg)
+    except Exception as e:
+        return False, "写入配置失败: %s" % e
+    # mihomo 热重载（不重启进程，规则即时生效）
+    ok, out = reload_mihomo()
+    if not ok:
+        return False, "配置已写入但重载失败: %s" % out
+    _state["mode"] = mode
+    save_state()
+    return True, "已切换为 %s 模式（%s）" % (mode, MODE_GROUPS[mode])
+
+
+def reload_mihomo():
+    """通过 mihomo API 热重载配置，返回 (ok, msg)"""
+    import json as _json
+    try:
+        body = _json.dumps({"path": TP_CONFIG}).encode()
+        req = urllib.request.Request(MIHOMO_API + "/configs?force=true",
+                                     data=body, method="PUT",
+                                     headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        return resp.status == 204, "HTTP %d" % resp.status
+    except Exception as e:
+        return False, str(e)
+
+
 # ---------------------------------------------------------------- 代理连通性测试
 
 def test_proxy_connectivity(proxy="", user="", pw=""):
@@ -299,7 +366,10 @@ class AdminHandler(BaseHTTPRequestHandler):
             self.send_json({
                 "enabled": enabled,
                 "proxy": "mihomo 透明代理",
+                "mode": get_mode(),
             })
+        elif path == "/api/mode":
+            self.send_json({"ok": True, "mode": get_mode(), "groups": MODE_GROUPS})
         elif path == "/api/config":
             self.send_json({
                 "ok": True,
@@ -324,6 +394,19 @@ class AdminHandler(BaseHTTPRequestHandler):
         path = self.route_path()
         if path.startswith("/api/mihomo/"):
             self.proxy_mihomo()
+        elif path == "/api/mode":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                raw = self.rfile.read(length).decode("utf-8") if length else ""
+                body = json.loads(raw) if raw.strip() else {}
+            except Exception:
+                body = {}
+            mode = (body.get("mode") or "").strip().lower()
+            if not mode:
+                self.send_json({"ok": False, "error": "缺少 mode 参数（manual/auto/fallback）"})
+                return
+            ok, msg = set_mode(mode)
+            self.send_json({"ok": ok, "mode": get_mode(), "msg": msg})
         elif path == "/api/proxy/on":
             # 先确保配置已生成（有订阅拉取 / 无订阅静态），再启动
             subs = get_subscriptions()
