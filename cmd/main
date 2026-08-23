@@ -9,8 +9,9 @@ APP_DIR="${TRIM_APPDEST}/server"
 SOCKET_PATH="${TRIM_APPDEST}/app.sock"
 STATE_FILE="${TRIM_PKGVAR}/state.json"
 WWW_DIR="${TRIM_APPDEST}/www"
+TP_DIR="/vol1/@appdata/proxy-switch/transparent-proxy"
 
-CMD="cd ${APP_DIR} && SOCKET_PATH=${SOCKET_PATH} STATE_FILE=${STATE_FILE} WWW_DIR=${WWW_DIR} python3 proxy_server.py"
+CMD="cd ${APP_DIR} && SOCKET_PATH=${SOCKET_PATH} STATE_FILE=${STATE_FILE} WWW_DIR=${WWW_DIR} TP_SCRIPT=${TP_DIR}/tp.sh GEN_SCRIPT=${TP_DIR}/gen_config.py python3 proxy_server.py"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> ${LOG_FILE}

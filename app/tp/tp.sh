@@ -5,7 +5,7 @@
 # 用法: tp.sh start|stop|status|purge
 # 权限：以 root 运行（fnOS 应用进程默认 root，无需 sudo）；mihomo redir 也需要 root(CAP_NET_ADMIN)
 
-BASE=/vol1/1000/transparent-proxy
+BASE=/vol1/@appdata/proxy-switch/transparent-proxy
 MIHOMO=$BASE/mihomo
 CONF=$BASE/tp-config.yaml
 PIDFILE=/tmp/tp-mihomo.pid

@@ -1,5 +1,5 @@
 appname=proxy-switch
-version=2.3.0
+version=2.4.0
 display_name=NAS透明代理
 desc=一键开启/关闭 NAS 全局透明代理（mihomo + iptables），全机实时生效；关闭立即直连，卸载自动清理。
 source=thirdparty

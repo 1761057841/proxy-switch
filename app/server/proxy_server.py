@@ -14,10 +14,10 @@ proxy-switch 应用主程序 —— NAS 透明代理开关（v2.1）
    应用流量 → iptables REDIRECT → mihomo(redir 7893 + dns 53) → 机场节点
 
 依赖（部署在 NAS 上）：
-   - /vol1/1000/transparent-proxy/tp.sh         开关脚本
-   - /vol1/1000/transparent-proxy/mihomo        二进制
-   - /vol1/1000/transparent-proxy/tp-config.yaml 配置（含节点）
-   - /vol1/1000/transparent-proxy/gen_config.py  配置生成器（订阅/静态）
+   - /vol1/@appdata/proxy-switch/transparent-proxy/tp.sh         开关脚本
+   - /vol1/@appdata/proxy-switch/transparent-proxy/mihomo        二进制
+   - /vol1/@appdata/proxy-switch/transparent-proxy/tp-config.yaml 配置（含节点）
+   - /vol1/@appdata/proxy-switch/transparent-proxy/gen_config.py  配置生成器（订阅/静态）
 
 环境变量：
 - SOCKET_PATH  统一网关 Unix Socket 路径（由 cmd/main 传入 ${TRIM_APPDEST}/app.sock）
@@ -37,8 +37,8 @@ WWW_DIR = os.environ.get("WWW_DIR", os.path.join(os.path.dirname(os.path.abspath
 GATEWAY_PREFIX = os.environ.get("GATEWAY_PREFIX", "/app/proxy-switch")
 
 # 透明代理脚本
-TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/1000/transparent-proxy/tp.sh")
-GEN_SCRIPT = os.environ.get("GEN_SCRIPT", "/vol1/1000/transparent-proxy/gen_config.py")
+TP_SCRIPT = os.environ.get("TP_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/tp.sh")
+GEN_SCRIPT = os.environ.get("GEN_SCRIPT", "/vol1/@appdata/proxy-switch/transparent-proxy/gen_config.py")
 
 _state = {"enabled": False, "subscription": ""}
 

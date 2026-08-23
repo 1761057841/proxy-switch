@@ -8,7 +8,7 @@
 ### - 删除透明代理目录（含 mihomo 二进制与节点配置）
 ###   注：若用户从未部署过透明代理（目录不存在），全部静默跳过
 
-TP_DIR=/vol1/1000/transparent-proxy
+TP_DIR=/vol1/@appdata/proxy-switch/transparent-proxy
 TP_SH=$TP_DIR/tp.sh
 RESOLV_BAK=/etc/resolv.conf.bak-tproxy
 

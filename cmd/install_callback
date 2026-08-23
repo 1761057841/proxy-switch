@@ -1,21 +1,30 @@
 #!/bin/bash
 
 ### 安装后初始化透明代理目录
-### - 创建 /vol1/1000/transparent-proxy/
-### - 部署 tp.sh（开关脚本）
+### - 创建 /vol1/@appdata/proxy-switch/transparent-proxy/
+### - 部署 tp.sh（开关脚本）与 gen_config.py（订阅配置生成器）
 ### - 若已有 mihomo/配置则复用，否则提示用户放置
 
-TP_DIR=/vol1/1000/transparent-proxy
-TP_SH_SRC="${TRIM_APPDEST}/tp/tp.sh"   # 应用包内置脚本
+TP_DIR=/vol1/@appdata/proxy-switch/transparent-proxy
+APP_TP="${TRIM_APPDEST}/tp"   # 应用包内置脚本目录
 
 mkdir -p "$TP_DIR"
 
 # 部署 tp.sh（若不存在或旧版）
 if [ ! -f "$TP_DIR/tp.sh" ] || ! grep -q "purge" "$TP_DIR/tp.sh" 2>/dev/null; then
-    if [ -f "$TP_SH_SRC" ]; then
-        cp "$TP_SH_SRC" "$TP_DIR/tp.sh"
+    if [ -f "$APP_TP/tp.sh" ]; then
+        cp "$APP_TP/tp.sh" "$TP_DIR/tp.sh"
         chmod 755 "$TP_DIR/tp.sh"
         echo "已部署 tp.sh"
+    fi
+fi
+
+# 部署 gen_config.py（若不存在或旧版）
+if [ ! -f "$TP_DIR/gen_config.py" ] || ! grep -q "@appdata" "$TP_DIR/gen_config.py" 2>/dev/null; then
+    if [ -f "$APP_TP/gen_config.py" ]; then
+        cp "$APP_TP/gen_config.py" "$TP_DIR/gen_config.py"
+        chmod 755 "$TP_DIR/gen_config.py"
+        echo "已部署 gen_config.py"
     fi
 fi
 
