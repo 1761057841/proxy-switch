@@ -27,6 +27,7 @@ PROVIDER_BLOCK = """proxy-providers:
         url: "{url}"
         interval: 3600
         path: ./providers/airport.yaml
+        filter: "(?i)(🇯🇵|🇭🇰|🇺🇸|🇸🇬|🇹🇼|🇰🇷|🇩🇪|🇯p|日本|香港|新加坡|美国|台湾|韩国|德国|英国|法国|澳大利亚)"
         health-check:
             enable: true
             url: http://www.gstatic.com/generate_204
