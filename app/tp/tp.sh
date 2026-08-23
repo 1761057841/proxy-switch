@@ -36,25 +36,25 @@ del_rules() {
 }
 
 mihomo_running() {
-    pgrep -f "mihomo -d $BASE" >/dev/null 2>&1
+    pgrep -f "$MIHOMO -d $BASE" >/dev/null 2>&1
 }
 
 start() {
-    if mihomo_running; then
-        echo "mihomo 已在运行"
-    else
-        rm -f $PIDFILE
-        cd $BASE
-        bash -c "cd $BASE && exec $MIHOMO -d $BASE -f $CONF" > $BASE/mihomo.log 2>&1 &
-        sleep 3
-        if ! mihomo_running; then
-            echo "mihomo 启动失败，日志："
-            tail -8 $BASE/mihomo.log
-            exit 1
-        fi
-        pgrep -f "mihomo -d $BASE" | head -1 > $PIDFILE
-        echo "mihomo 已启动 (pid $(cat $PIDFILE), root)"
+    # 防双实例：先清掉遗留的旧 mihomo 进程（重启后残留会抢 socket）
+    pkill -f "mihomo -d $BASE" 2>/dev/null
+    sleep 1
+    rm -f $PIDFILE
+    cd $BASE
+    bash -c "cd $BASE && exec $MIHOMO -d $BASE -f $CONF" > $BASE/mihomo.log 2>&1 &
+    sleep 3
+    if ! mihomo_running; then
+        echo "mihomo 启动失败，日志："
+        tail -8 $BASE/mihomo.log
+        exit 1
     fi
+    # 记录实际运行的 mihomo PID（取最新启动的，排除 pgrep 自身）
+    pgrep -f "$MIHOMO -d $BASE" | tail -1 > $PIDFILE
+    echo "mihomo 已启动 (pid $(cat $PIDFILE), root)"
     add_rules
     # DNS 指向本机 mihomo
     if [ ! -f "$RESOLV_BAK" ]; then

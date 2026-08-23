@@ -130,7 +130,9 @@ def main():
         base = re.sub(r"(?m)^external-controller:\s*'[^']*'",
                       "external-controller: '127.0.0.1:9090'", base)
     if ports_state.get("dns") is False:
-        # DNS 关闭：改监听为本机随机端口（禁外部访问，保 internal dns 可用）
+        # DNS 关闭：禁用 DNS 服务 + 改监听为本机随机端口（禁外部访问，保 internal dns 可用）
+        base = re.sub(r"(?m)^    enable: true\s*$",
+                      "    enable: false", base)
         base = re.sub(r"(?m)^    listen: 0\.0\.0\.0:53",
                       "    listen: 127.0.0.1:0", base)
 

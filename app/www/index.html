@@ -160,7 +160,7 @@ body {
   min-height: 18px;
 }
 .mode-now {
-  font-size: 12.5px; color: #7dd3fc; margin-top: 6px;
+  font-size: 12.5px; color: #7dd3fc; margin: 6px 0 12px;
   padding: 6px 10px; border-radius: 8px;
   background: rgba(56, 189, 248, .08);
   border: 1px solid rgba(56, 189, 248, .18);
@@ -572,13 +572,13 @@ body {
       </div>
       <div class="block">
         <div class="block-label">代理模式</div>
+        <div class="mode-now" id="modeNow" title="当前实际连接的节点">当前节点：—</div>
         <div class="mode-row" id="modeRow">
           <button class="mode-btn" data-mode="manual" type="button" title="手动选择节点">🔧 手动</button>
           <button class="mode-btn" data-mode="auto" type="button" title="自动选延迟最低的节点">⚡ 自动选择</button>
           <button class="mode-btn" data-mode="fallback" type="button" title="节点故障时自动切换下一个">🔁 故障转移</button>
         </div>
         <div class="mode-desc" id="modeDesc"></div>
-        <div class="mode-now" id="modeNow" title="当前实际连接的节点">当前节点：—</div>
       </div>
       <div class="block">
         <div class="block-label">操作</div>
@@ -741,9 +741,12 @@ function renderMode(mode) {
   });
 }
 
+let _lastDelayCheck = 0;   // 上次测速时间戳
+let _lastDelayNode = '';   // 上次测速的节点
+
 async function loadModeNow(forceDelay) {
   // 获取当前模式对应组的 now 节点 + 其延迟（毫秒）
-  // forceDelay=true 时强制组测速（仅页面加载/模式切换时调用，避免 3s 高频测速）
+  // 延迟来源：测速缓存 pxDelays；无缓存时自动补测（节点变化立即测 / 3 分钟过期补测）
   try {
     const group = modeGroup();
     const res = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(group));
@@ -753,31 +756,45 @@ async function loadModeNow(forceDelay) {
     const el = document.getElementById('modeNow');
     if (!el) return;
     if (now) {
-      el.innerHTML = '当前节点：<span class="now-node">' + now + '</span>';
+      // 更新节点名（保留 .now-ms 徽章元素，不重建 DOM 避免徽章丢失）
+      let nodeEl = el.querySelector('.now-node');
+      if (!nodeEl) {
+        el.innerHTML = '当前节点：<span class="now-node"></span>';
+        nodeEl = el.querySelector('.now-node');
+      }
+      nodeEl.textContent = now;
       el.title = '当前实际连接的节点（' + group + ' 组）';
-      // 查延迟：优先测速缓存，没有且 forceDelay 时才组测速
+      // 查延迟：优先测速缓存
       let ms = null;
-      if (window.pxDelays && pxDelays[now] !== undefined) {
-        ms = pxDelays[now];
-      } else if (forceDelay) {
+      if (window.pxDelays && pxDelays[now] !== undefined) ms = pxDelays[now];
+      // 无缓存 → 补测：forceDelay 或 节点变化 或 距上次测速超过 3 分钟
+      const needTest = forceDelay || now !== _lastDelayNode || (Date.now() - _lastDelayCheck) > 180000;
+      if (ms === null && needTest) {
         try {
-          const dr = await fetch(API + '/api/mihomo/group/' + encodeURIComponent(group) + '/delay?url=' + encodeURIComponent('http://www.gstatic.com/generate_204') + '&timeout=5000');
+          // 单点测速：/proxies/{组}/delay 返回当前节点延迟 {"delay":ms}
+          const dr = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(group) + '/delay?url=' + encodeURIComponent('http://www.gstatic.com/generate_204') + '&timeout=5000');
           const dd = await dr.json();
-          if (dd && dd[now] !== undefined) ms = dd[now];
-          else if (dd && dd.delay !== undefined) ms = dd.delay;
-          // 测速结果入缓存，供节点列表共用
-          if (dd && typeof dd === 'object') {
+          if (dd && dd.delay !== undefined) ms = dd.delay;
+          if (ms !== null && ms !== undefined) {
             if (!window.pxDelays) window.pxDelays = {};
-            Object.assign(window.pxDelays, dd);
+            pxDelays[now] = ms;
           }
+          _lastDelayCheck = Date.now();
+          _lastDelayNode = now;
         } catch (e) {}
       }
-      const msEl = el.querySelector('.now-ms');
-      if (msEl) {
+      // 更新延迟徽章（存在则更新，否则创建）
+      let msEl = el.querySelector('.now-ms');
+      if (ms !== null && ms !== undefined) {
+        if (!msEl) {
+          msEl = document.createElement('span');
+          msEl.className = 'now-ms';
+          el.appendChild(msEl);
+        }
         msEl.className = 'now-ms ' + delayClass(ms);
         msEl.textContent = ms + ' ms';
-      } else if (ms !== null && ms !== undefined) {
-        el.insertAdjacentHTML('beforeend', ' <span class="now-ms ' + delayClass(ms) + '">' + ms + ' ms</span>');
+      } else if (msEl) {
+        msEl.remove();
       }
     } else {
       el.textContent = '当前节点：—';
@@ -1167,7 +1184,7 @@ async function saveSub() {
         subs = data.subscriptions.map(s => ({ name: s.name || '', url: s.url || '' }));
         renderSubList();
       }
-      render(data.enabled, data.proxy);
+      render(data.enabled, data.proxy, data.localEnabled);
       loadSub();
     } else {
       setSubMsg('❌ ' + (data.error || '保存失败'), 'err');
@@ -1283,6 +1300,11 @@ function renderConnections(data) {
   const count = document.getElementById('connCount');
   const cs = data && data.connections ? data.connections : [];
   count.textContent = cs.length + ' 条';
+  // 清理已断开连接的速率缓存（防 prevBytes 无限增长）
+  const liveIds = new Set(cs.map(c => c.id));
+  Object.keys(prevBytes).forEach(id => {
+    if (!liveIds.has(id)) delete prevBytes[id];
+  });
   if (!cs.length) {
     list.innerHTML = '<div class="conn-empty">暂无活动连接（有流量经过时会显示在这里）</div>';
     return;
@@ -1393,7 +1415,6 @@ async function togglePort(port) {
     const d = await res.json();
     if (d.ok) {
       loadPorts();
-      const name = document.querySelector('#portCard-' + port + ' .port-name');
       setMsg(d.msg, 'ok');
     } else {
       setMsg('❌ ' + (d.error || d.msg), 'err');

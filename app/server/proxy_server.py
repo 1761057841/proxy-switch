@@ -238,9 +238,17 @@ def fmt_bytes(n):
 
 def refresh_provider(pname):
     """调用 mihomo 刷新指定 provider，返回 (ok, msg)"""
-    # 刷新后清 userinfo 缓存，重新拉取最新流量
-    _userinfo_cache.clear()
-    _userinfo_fail_ts.clear()
+    # 刷新后清该 provider 对应订阅的 userinfo 缓存（不清其他订阅，避免重复打机场被限流）
+    # pname 形如 airportN，对应 subscriptions 列表第 N-1 项
+    try:
+        idx = int(pname.replace("airport", "")) - 1
+        subs = get_subscriptions()
+        if 0 <= idx < len(subs):
+            url = subs[idx]["url"]
+            _userinfo_cache.pop(url, None)
+            _userinfo_fail_ts.pop(url, None)
+    except Exception:
+        pass
     try:
         req = urllib.request.Request(MIHOMO_API + "/providers/proxies/" + pname, method="PUT")
         resp = urllib.request.urlopen(req, timeout=30)
@@ -349,11 +357,19 @@ def set_port_state(port, on):
                              "external-controller: '%s'" % ("0.0.0.0:9090" if on else "127.0.0.1:9090"), cfg)
     elif port == "dns":
         if on:
-            new_cfg, n = re.subn(r"(?m)^    listen: 127\.0\.0\.1:0",
-                                 "    listen: 0.0.0.0:53", cfg)
+            new_cfg, n1 = re.subn(r"(?m)^    enable: false\s*$",
+                                  "    enable: true", cfg)
+            new_cfg, n2 = re.subn(r"(?m)^    listen: 127\.0\.0\.1:0",
+                                  "    listen: 0.0.0.0:53", new_cfg)
+            n = n1 + n2
         else:
-            new_cfg, n = re.subn(r"(?m)^    listen: 0\.0\.0\.0:53",
-                                 "    listen: 127.0.0.1:0", cfg)
+            new_cfg, n1 = re.subn(r"(?m)^    enable: true\s*$",
+                                  "    enable: false", cfg)
+            new_cfg, n2 = re.subn(r"(?m)^    listen: 0\.0\.0\.0:53",
+                                  "    listen: 127.0.0.1:0", new_cfg)
+            n = n1 + n2
+            # DNS 关闭 → 本机 resolv.conf 不能再指向 127.0.0.1（否则 DNS 全挂），恢复默认 DNS
+            run_tp("stop-local")
     if n == 0:
         return False, "配置中未找到 %s 端口行" % port
     try:
@@ -454,6 +470,7 @@ def test_proxy_connectivity(proxy="", user="", pw=""):
 
 class AdminHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    _stats_lock = None  # 实时速率快照锁（延迟初始化）
     _stats_prev = None  # 实时速率计算用（上一次快照 (ts, upTotal, downTotal)）
 
     def route_path(self):
@@ -777,15 +794,19 @@ class AdminHandler(BaseHTTPRequestHandler):
             out["connCount"] = len(d.get("connections", []))
         except Exception:
             pass
-        # 3. 速率：基于上次快照
+        # 4. 速率：基于上次快照（加锁防多线程并发竞争）
+        import threading
+        if AdminHandler._stats_lock is None:
+            AdminHandler._stats_lock = threading.Lock()
         now = time.time()
-        prev = self._stats_prev
-        if prev:
-            dt = now - prev[0]
-            if dt > 0:
-                out["upSpeed"] = max(0, (out["upTotal"] - prev[1]) / dt)
-                out["downSpeed"] = max(0, (out["downTotal"] - prev[2]) / dt)
-        self._stats_prev = (now, out["upTotal"], out["downTotal"])
+        with AdminHandler._stats_lock:
+            prev = self._stats_prev
+            if prev:
+                dt = now - prev[0]
+                if dt > 0:
+                    out["upSpeed"] = max(0, (out["upTotal"] - prev[1]) / dt)
+                    out["downSpeed"] = max(0, (out["downTotal"] - prev[2]) / dt)
+            self._stats_prev = (now, out["upTotal"], out["downTotal"])
         return out
 
     def _proxy_stream(self, target, body=None):
@@ -972,20 +993,32 @@ class AdminHandler(BaseHTTPRequestHandler):
             if p.returncode != 0:
                 self.send_json({"ok": False, "error": (p.stderr or p.stdout or "生成配置失败").strip()})
                 return
-            # 重启代理（无论开关状态都重载配置）
-            run_tp("stop")
-            run_tp("start")
+            # 重新生成配置后：仅当代理原本开启时才重启（避免保存订阅就强制开启代理）
+            was_enabled, was_local, _ = tp_status()
+            if was_enabled:
+                run_tp("stop")
+                run_tp("start")
             enabled, local_enabled, _ = tp_status()
             _state["enabled"] = enabled
             _state["local_enabled"] = local_enabled
             save_state()
             mode = "订阅模式(%d)" % len(subs) if subs else "静态节点模式"
-            self.send_json({
-                "ok": True,
-                "enabled": enabled,
-                "subscriptions": subs,
-                "msg": "%s，代理已重启生效" % mode,
-            })
+            if was_enabled:
+                self.send_json({
+                    "ok": True,
+                    "enabled": enabled,
+                    "localEnabled": local_enabled,
+                    "subscriptions": subs,
+                    "msg": "%s，代理已重启生效" % mode,
+                })
+            else:
+                self.send_json({
+                    "ok": True,
+                    "enabled": enabled,
+                    "localEnabled": local_enabled,
+                    "subscriptions": subs,
+                    "msg": "%s，配置已保存（代理未开启，未重启）" % mode,
+                })
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)})
 

@@ -1,5 +1,12 @@
 #!/bin/bash
 
-### This script is called after the user upgrades the application.
+### 升级后初始化透明代理目录
+### - 复用 install_callback 的部署逻辑（更新 tp.sh/gen_config.py/tp-base.yaml/mihomo 等）
+### - 已存在文件保留用户配置（如 tp-config.yaml、state.json）
+
+# 直接复用安装部署脚本（幂等：缺失才部署，已有保留）
+if [ -f "${TRIM_APPDEST}/cmd/install_callback" ]; then
+    bash "${TRIM_APPDEST}/cmd/install_callback" >> /vol1/@appdata/proxy-switch/upgrade.log 2>&1 || true
+fi
 
 exit 0

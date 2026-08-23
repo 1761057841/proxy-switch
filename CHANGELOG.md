@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.12.4 (2026-08-24)
+
+**代码全面审查 + Bug 修复**
+
+- 🐛 修复：当前节点延迟"时有时无"——loadModeNow 每次 innerHTML 重建 DOM 导致延迟徽章丢失，改为只更新节点文本、保留徽章元素
+- 🐛 修复：保存订阅时无条件重启代理 → 改为仅当代理原本开启才重启（保存订阅不会强制开启代理）
+- 🐛 修复：刷新单个订阅清空全部 userinfo 缓存 → 只清该订阅对应缓存，避免重复打机场被限流
+- 🐛 修复：关闭 DNS 端口后本机 DNS 全挂 → 关闭时同时 `dns.enable: false` + 恢复 resolv.conf（stop-local）
+- 🐛 修复：tp.sh start 双实例残留 → 启动前清理旧 mihomo 进程 + 用完整路径匹配 PID
+- 🐛 修复：saveSub 后 render 缺 localEnabled 参数导致本机状态显示错误 → 后端响应补 localEnabled
+- 🐛 修复：实时速率快照多线程竞争 → 加 threading.Lock 保护 _stats_prev
+- 🐛 修复：连接面板 prevBytes 缓存无限增长 → 断开连接的 ID 自动清理
+- 🐛 修复：升级应用时 tp.sh/gen_config.py 不更新 → upgrade_callback 复用 install_callback 部署逻辑
+
 ## v2.12.3 (2026-08-23)
 
 **新功能：控制台显示当前连接节点 + 延迟**
@@ -195,6 +209,20 @@
 - 修复应用图标不显示问题（旧版 fpk 图标缺失）
 
 # Changelog
+
+## v2.12.4 (2026-08-24)
+
+**代码全面审查 + Bug 修复**
+
+- 🐛 修复：当前节点延迟"时有时无"——loadModeNow 每次 innerHTML 重建 DOM 导致延迟徽章丢失，改为只更新节点文本、保留徽章元素
+- 🐛 修复：保存订阅时无条件重启代理 → 改为仅当代理原本开启才重启（保存订阅不会强制开启代理）
+- 🐛 修复：刷新单个订阅清空全部 userinfo 缓存 → 只清该订阅对应缓存，避免重复打机场被限流
+- 🐛 修复：关闭 DNS 端口后本机 DNS 全挂 → 关闭时同时 `dns.enable: false` + 恢复 resolv.conf（stop-local）
+- 🐛 修复：tp.sh start 双实例残留 → 启动前清理旧 mihomo 进程 + 用完整路径匹配 PID
+- 🐛 修复：saveSub 后 render 缺 localEnabled 参数导致本机状态显示错误 → 后端响应补 localEnabled
+- 🐛 修复：实时速率快照多线程竞争 → 加 threading.Lock 保护 _stats_prev
+- 🐛 修复：连接面板 prevBytes 缓存无限增长 → 断开连接的 ID 自动清理
+- 🐛 修复：升级应用时 tp.sh/gen_config.py 不更新 → upgrade_callback 复用 install_callback 部署逻辑
 
 ## v2.12.3 (2026-08-23)
 
