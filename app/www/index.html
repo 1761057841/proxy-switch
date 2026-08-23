@@ -122,6 +122,9 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .sub-icon-btn:hover { background: rgba(148, 163, 184, .25); }
 .sub-icon-btn.del:hover { background: rgba(239, 68, 68, .25); border-color: rgba(239, 68, 68, .5); color: #fca5a5; }
+.sub-icon-btn.speed { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
+.sub-icon-btn.speed:hover { background: rgba(251, 191, 36, .15); border-color: #fbbf24; }
+.sub-icon-btn:disabled { opacity: .5; cursor: wait; }
 .sub-card-mid { margin-bottom: 10px; }
 .sub-traffic-num { font-size: 13px; font-weight: 600; color: #f0abfc; font-family: ui-monospace, Consolas, monospace; }
 .sub-traffic-label { font-size: 11px; color: #94a3b8; }
@@ -135,12 +138,25 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   background: linear-gradient(90deg, #f472b6, #ef4444);
   transition: width .4s ease;
 }
-.sub-card-bottom { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #94a3b8; flex-wrap: wrap; gap: 6px; }
+.sub-card-bottom { display: flex; align-items: center; font-size: 12px; color: #94a3b8; flex-wrap: wrap; gap: 6px; }
 .sub-card-bottom .exp { color: #cbd5e1; }
 .sub-card-bottom .upd {
   font-size: 11px; background: rgba(148, 163, 184, .12);
   padding: 2px 8px; border-radius: 6px; color: #94a3b8;
 }
+.sub-expand-btn {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(148, 163, 184, .35);
+  background: rgba(148, 163, 184, .1); color: #cbd5e1; font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; margin-left: auto;
+  transition: transform .2s, background .2s, border-color .2s, color .2s;
+}
+.sub-expand-btn:hover { background: rgba(56, 189, 248, .2); border-color: #38bdf8; color: #7dd3fc; }
+.sub-expand-btn.open { transform: rotate(180deg); background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #7dd3fc; }
+.sub-nodes { display: none; margin-top: 10px; border-top: 1px dashed rgba(148, 163, 184, .25); padding-top: 10px; }
+.sub-nodes .px-grid { max-height: 320px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.sub-nodes .px-node { font-size: 12px; }
+.sub-nodes-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; color: #94a3b8; }
+.sub-nodes-head .px-group-tab { pointer-events: none; opacity: .85; }
 .sub-edit-form { margin-top: 10px; border-top: 1px dashed rgba(148, 163, 184, .2); padding-top: 10px; }
 .sub-edit-form .sub-row { display: flex; gap: 8px; margin-bottom: 8px; }
 .sub-edit-form input[type=text] {
@@ -153,17 +169,12 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 }
 .sub-edit-form input[type=text]:focus { border-color: #38bdf8; }
 
-/* ---- 代理节点（仿 MetaCubeXD 代理页）---- */
-.px-groups { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+/* ---- 节点网格（内嵌卡片）---- */
 .px-group-tab {
-  padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  padding: 4px 10px; border-radius: 6px; font-size: 11px;
   background: rgba(148, 163, 184, .12); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, .25);
-  transition: all .15s;
 }
-.px-group-tab.active { background: rgba(56, 189, 248, .18); border-color: #38bdf8; color: #7dd3fc; }
-.px-group-tab .px-now { font-size: 10px; opacity: .7; margin-left: 4px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
-.px-tools { display: flex; gap: 8px; margin-bottom: 10px; }
-.px-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.px-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
 .px-node {
   background: rgba(15, 23, 42, .55); border: 1px solid rgba(148, 163, 184, .25);
   border-radius: 8px; padding: 8px 10px; cursor: pointer; transition: all .15s;
@@ -178,7 +189,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .px-delay.mid { color: #fbbf24; background: rgba(251, 191, 36, .12); }
 .px-delay.bad { color: #f87171; background: rgba(248, 113, 113, .12); }
 .px-delay.na { color: #94a3b8; background: rgba(148, 163, 184, .1); }
-.px-msg { margin-top: 8px; }
+
 </style>
 </head>
 <body>
@@ -205,18 +216,6 @@ h1 { font-size: 22px; margin-bottom: 6px; }
   </div>
 
   <div class="config">
-    <h2>🌐 代理节点</h2>
-    <div class="px-groups" id="pxGroups"></div>
-    <div class="px-tools">
-      <button class="test-btn" id="pxTestAllBtn" type="button">⚡ 全部测速</button>
-      <button class="test-btn" id="pxRefreshBtn" type="button">🔄 刷新节点</button>
-    </div>
-    <div class="px-grid" id="pxGrid"></div>
-    <div class="msg px-msg" id="pxMsg"></div>
-    <div class="sub-hint">点击节点立即切换当前策略组节点（实时生效）；⚡ 全部测速测试所有节点延迟。</div>
-  </div>
-
-  <div class="config">
     <h2>📡 订阅设置（可选）</h2>
     <div id="subList"></div>
     <div class="btn-row">
@@ -225,7 +224,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
       <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除全部</button>
     </div>
     <div class="msg" id="subMsg"></div>
-    <div class="sub-hint">支持多个机场订阅，每个可自定义名称；节点合并到同一策略组，每小时自动更新。保存后代理自动重启生效。</div>
+    <div class="sub-hint">每个订阅卡片：流量进度条 + 已用/总流量 + 到期/更新；点击右下角 ▼ 展开节点列表（点击节点即切换，⚡ 测速）。支持多机场，节点合并到同一策略组，每小时自动更新。</div>
   </div>
 
   <div class="hint">
@@ -234,7 +233,7 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     · 关闭 = 立即恢复直连<br>
     · 节点在 <code>/vol1/@appdata/proxy-switch/transparent-proxy/tp-config.yaml</code> 中维护<br>
     · 内网地址（192.168.x / 10.x 等）自动直连，不受影响<br>
-    · 📊 节点面板 = 在新窗口打开 MetaCubeXD 面板（需已开启代理）
+    · 📊 节点面板 = 在新窗口打开 MetaCubeXD 完整面板（高级功能，需已开启代理）
   </div>
 </div>
 <script>
@@ -294,133 +293,10 @@ async function testConfig() {
 
 document.getElementById('testBtn').addEventListener('click', testConfig);
 
-// ---- 代理节点（仿 MetaCubeXD 代理页）----
-const pxGroupsEl = document.getElementById('pxGroups');
-const pxGridEl = document.getElementById('pxGrid');
-const pxMsgEl = document.getElementById('pxMsg');
-let pxGroups = [];      // [{name, type, now, nodes:[]}]
-let pxActive = '';      // 当前选中的组名
-let pxDelays = {};      // 节点名 -> 延迟ms
 
-function setPxMsg(text, type) {
-  pxMsgEl.className = 'msg px-msg' + (type ? ' ' + type : '');
-  pxMsgEl.textContent = text || '';
-}
-
-async function loadProxies() {
-  try {
-    const res = await fetch(API + '/api/mihomo/proxies');
-    const d = await res.json();
-    const proxies = d.proxies || {};
-    // 收集策略组（Selector / URLTest / Fallback，排除内置 GLOBAL）
-    const groups = [];
-    for (const name in proxies) {
-      const p = proxies[name];
-      if (['Selector', 'URLTest', 'Fallback'].includes(p.type) && name !== 'GLOBAL') {
-        groups.push({ name, type: p.type, now: p.now || '', nodes: p.all || [] });
-      }
-    }
-    // 保持顺序：PROXY 优先
-    groups.sort((a, b) => (a.name === 'PROXY' ? -1 : b.name === 'PROXY' ? 1 : 0));
-    pxGroups = groups;
-    if (!pxActive || !groups.find(g => g.name === pxActive)) {
-      pxActive = groups.length ? groups[0].name : '';
-    }
-    renderGroups();
-    renderNodes();
-  } catch (e) {
-    setPxMsg('❌ 无法获取节点（代理未开启？）', 'err');
-  }
-}
-
-function renderGroups() {
-  pxGroupsEl.innerHTML = '';
-  pxGroups.forEach(g => {
-    const tab = document.createElement('div');
-    tab.className = 'px-group-tab' + (g.name === pxActive ? ' active' : '');
-    const typeLabel = { Selector: '手动', URLTest: '自动', Fallback: '故障' }[g.type] || g.type;
-    tab.innerHTML = esc(g.name) + ' <span class="px-now" title="当前: ' + esc(g.now) + '">(' + typeLabel + ' · ' + esc(g.now || '—') + ')</span>';
-    tab.addEventListener('click', () => { pxActive = g.name; renderGroups(); renderNodes(); });
-    pxGroupsEl.appendChild(tab);
-  });
-}
-
-function delayClass(ms) {
-  if (ms === undefined || ms === null) return 'na';
-  if (ms < 200) return 'good';
-  if (ms < 500) return 'mid';
-  return 'bad';
-}
-
-function renderNodes() {
-  const g = pxGroups.find(x => x.name === pxActive);
-  pxGridEl.innerHTML = '';
-  if (!g) return;
-  g.nodes.forEach(node => {
-    const el = document.createElement('div');
-    const isActive = node === g.now;
-    const delay = pxDelays[node];
-    const dCls = delayClass(delay);
-    el.className = 'px-node' + (isActive ? ' active' : '');
-    el.innerHTML =
-      '<span class="px-node-name">' + (isActive ? '<span class="px-check">✓</span>' : '') + esc(node) + '</span>' +
-      '<span class="px-delay ' + dCls + '">' + (delay !== undefined ? delay + 'ms' : '—') + '</span>';
-    el.title = node + (isActive ? '（当前选中）' : '');
-    el.addEventListener('click', () => switchNode(g.name, node));
-    pxGridEl.appendChild(el);
-  });
-}
-
-async function switchNode(group, node) {
-  if (node === pxGroups.find(x => x.name === group)?.now) return;
-  setPxMsg('⏳ 切换到 ' + node + ' …', 'info');
-  try {
-    const res = await fetch(API + '/api/mihomo/proxies/' + encodeURIComponent(group), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: node })
-    });
-    if (res.status === 204 || res.ok) {
-      setPxMsg('✅ 已切换到 ' + node, 'ok');
-      // 更新 now
-      const g = pxGroups.find(x => x.name === group);
-      if (g) g.now = node;
-      renderGroups(); renderNodes();
-    } else {
-      let d = {}; try { d = await res.json(); } catch (e) {}
-      setPxMsg('❌ 切换失败：' + (d.message || d.error || res.status), 'err');
-    }
-  } catch (e) {
-    setPxMsg('❌ 切换失败：无法连接服务', 'err');
-  }
-}
-
-async function testAllDelay() {
-  if (!pxActive) return;
-  const btn = document.getElementById('pxTestAllBtn');
-  btn.disabled = true;
-  setPxMsg('⚡ 正在测试全部节点延迟…（约 10-30 秒）', 'info');
-  try {
-    const url = encodeURIComponent('http://www.gstatic.com/generate_204');
-    const res = await fetch(API + '/api/mihomo/group/' + encodeURIComponent(pxActive) + '/delay?url=' + url + '&timeout=5000');
-    const d = await res.json();
-    pxDelays = d || {};
-    setPxMsg('✅ 测速完成，共 ' + Object.keys(pxDelays).length + ' 个节点', 'ok');
-    renderNodes();
-  } catch (e) {
-    setPxMsg('❌ 测速失败：' + (e.message || '无法连接服务'), 'err');
-  }
-  btn.disabled = false;
-}
-
-document.getElementById('pxTestAllBtn').addEventListener('click', testAllDelay);
-document.getElementById('pxRefreshBtn').addEventListener('click', () => {
-  setPxMsg('🔄 正在刷新节点…', 'info');
-  loadProxies();
   setTimeout(() => setPxMsg(''), 1500);
 });
 
-loadProxies();
 
 // ---- 订阅设置（多订阅卡片 + 状态信息）----
 const subList = document.getElementById('subList');
@@ -463,10 +339,12 @@ function renderSubList() {
     subList.innerHTML = '<div class="sub-hint" style="padding:6px 0">暂无订阅，点击「➕ 添加订阅」填入机场链接（可多个）。</div>';
     return;
   }
-    subs.forEach((s, i) => {
-    const st = subStatus['airport' + (i + 1)] || {};
+  subs.forEach((s, i) => {
+    const provider = 'airport' + (i + 1);
+    const st = subStatus[provider] || {};
     const item = document.createElement('div');
     item.className = 'sub-item';
+    item.dataset.provider = provider;
     // 流量进度条：已用百分比（有 total 用 usedPct，否则按剩余估算）
     let pct = st.usedPct || 0;
     if (!st.trafficTotal) {
@@ -483,6 +361,7 @@ function renderSubList() {
         '<span class="sub-card-name" title="' + esc(s.url || '') + '">' + esc(s.name || ('订阅' + (i + 1))) + '</span>' +
         (st.nodeCount ? '<span class="sub-tag">' + st.nodeCount + '</span>' : '') +
         '<span class="sub-tag http">HTTP</span>' +
+        '<button class="sub-icon-btn speed" data-act="speed" title="全部测速">⚡</button>' +
         '<button class="sub-icon-btn" data-act="refresh" title="刷新订阅">⟳</button>' +
         '<button class="sub-icon-btn" data-act="edit" title="编辑">✏️</button>' +
         '<button class="sub-icon-btn del" data-act="del" title="删除">🗑</button>' +
@@ -498,6 +377,14 @@ function renderSubList() {
         '<span>到期时间: <span class="exp">' + (st.expire || '—') + '</span></span>' +
         (st.reset ? '<span>重置: ' + esc(st.reset) + '</span>' : '') +
         '<span class="upd">' + upd + '</span>' +
+        '<button class="sub-expand-btn" data-act="expand" title="展开节点">▼</button>' +
+      '</div>' +
+      '<div class="sub-nodes">' +
+        '<div class="sub-nodes-head">' +
+          '<span class="px-group-tab">PROXY · 点击节点切换</span>' +
+          '<span>展开加载中…</span>' +
+        '</div>' +
+        '<div class="px-grid"></div>' +
       '</div>' +
       '<div class="sub-edit-form" style="display:none">' +
         '<div class="sub-row">' +
@@ -510,6 +397,8 @@ function renderSubList() {
         '</div>' +
       '</div>';
     // 操作绑定
+    item.querySelector('[data-act=speed]').addEventListener('click', () => testAllDelay(i, item));
+    item.querySelector('[data-act=expand]').addEventListener('click', () => toggleNodes(item));
     item.querySelector('[data-act=refresh]').addEventListener('click', () => refreshSub(i, item));
     item.querySelector('[data-act=edit]').addEventListener('click', () => {
       const form = item.querySelector('.sub-edit-form');
@@ -530,6 +419,123 @@ function renderSubList() {
     });
     subList.appendChild(item);
   });
+}
+
+// ---- 节点展开 / 测速 / 切换（内嵌卡片）----
+let pxDelays = {};      // 节点名 -> 延迟ms
+
+function delayClass(ms) {
+  if (ms === undefined || ms === null) return 'na';
+  if (ms < 200) return 'good';
+  if (ms < 500) return 'mid';
+  return 'bad';
+}
+
+async function toggleNodes(item) {
+  const nodesEl = item.querySelector('.sub-nodes');
+  const btn = item.querySelector('[data-act=expand]');
+  const isOpen = nodesEl.style.display !== 'none';
+  if (isOpen) {
+    nodesEl.style.display = 'none';
+    btn.classList.remove('open');
+    return;
+  }
+  nodesEl.style.display = 'block';
+  btn.classList.add('open');
+  await renderNodes(item);
+}
+
+async function renderNodes(item) {
+  const provider = item.dataset.provider;
+  const grid = item.querySelector('.sub-nodes .px-grid');
+  const head = item.querySelector('.sub-nodes-head');
+  const lastSpan = head.querySelector('span:last-child');
+  grid.innerHTML = '';
+  // 从 mihomo API 拿该 provider 的节点 + 当前选中 + 延迟（若有测速）
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch(API + '/api/mihomo/providers/proxies/' + provider),
+      fetch(API + '/api/mihomo/proxies/PROXY')
+    ]);
+    const d1 = await r1.json();
+    const d2 = await r2.json();
+    const nodes = (d1.proxies || []).map(p => p.name);
+    const now = (d2 && d2.now) || '';
+    if (lastSpan) lastSpan.textContent = nodes.length ? (nodes.length + ' 节点') : '无节点';
+    if (!nodes.length) {
+      grid.innerHTML = '<div class="sub-hint">该订阅暂无节点（代理未开启或订阅为空）</div>';
+      return;
+    }
+    nodes.forEach(node => {
+      const el = document.createElement('div');
+      const isActive = node === now;
+      const delay = pxDelays[node];
+      const dCls = delayClass(delay);
+      el.className = 'px-node' + (isActive ? ' active' : '');
+      el.innerHTML =
+        '<span class="px-node-name">' + (isActive ? '<span class="px-check">✓</span>' : '') + esc(node) + '</span>' +
+        '<span class="px-delay ' + dCls + '">' + (delay !== undefined ? delay + 'ms' : '—') + '</span>';
+      el.title = node + (isActive ? '（当前选中）' : '');
+      el.addEventListener('click', () => switchNode(item, node));
+      grid.appendChild(el);
+    });
+  } catch (e) {
+    if (lastSpan) lastSpan.textContent = '加载失败';
+    grid.innerHTML = '<div class="sub-hint">❌ 无法获取节点（代理未开启？）</div>';
+  }
+}
+
+async function switchNode(item, node) {
+  // 当前选中
+  let now = '';
+  try {
+    const r = await fetch(API + '/api/mihomo/proxies/PROXY');
+    const d = await r.json();
+    now = d.now || '';
+  } catch (e) {}
+  if (node === now) return;
+  setSubMsg('⏳ 切换到 ' + node + ' …', 'info');
+  try {
+    const res = await fetch(API + '/api/mihomo/proxies/PROXY', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: node })
+    });
+    if (res.status === 204 || res.ok) {
+      setSubMsg('✅ 已切换到 ' + node, 'ok');
+      // 重新渲染展开的卡片节点（高亮更新）
+      document.querySelectorAll('.sub-item').forEach(it => {
+        if (it.querySelector('.sub-nodes').style.display !== 'none') renderNodes(it);
+      });
+    } else {
+      let d = {}; try { d = await res.json(); } catch (e) {}
+      setSubMsg('❌ 切换失败：' + (d.message || d.error || res.status), 'err');
+    }
+  } catch (e) {
+    setSubMsg('❌ 切换失败：无法连接服务', 'err');
+  }
+}
+
+async function testAllDelay(i, item) {
+  const btn = item.querySelector('[data-act=speed]');
+  btn.disabled = true;
+  btn.textContent = '…';
+  setSubMsg('⚡ 正在测试全部节点延迟…（约 10-30 秒）', 'info');
+  try {
+    const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+    const res = await fetch(API + '/api/mihomo/group/PROXY/delay?url=' + url + '&timeout=5000');
+    const d = await res.json();
+    pxDelays = d || {};
+    setSubMsg('✅ 测速完成，共 ' + Object.keys(pxDelays).length + ' 个节点', 'ok');
+    // 刷新所有展开卡片的节点延迟
+    document.querySelectorAll('.sub-item').forEach(it => {
+      if (it.querySelector('.sub-nodes').style.display !== 'none') renderNodes(it);
+    });
+  } catch (e) {
+    setSubMsg('❌ 测速失败：' + (e.message || '无法连接服务'), 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '⚡';
 }
 
 function esc(v) {
