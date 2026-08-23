@@ -33,7 +33,7 @@ PROVIDER_BLOCK = """proxy-providers:
             interval: 300
 
 proxy-groups:
-    - {{ name: 良心云, type: select, use: [airport] }}
+    - {{ name: PROXY, type: select, use: [airport] }}
     - {{ name: 自动选择, type: url-test, use: [airport], url: 'http://www.gstatic.com/generate_204', interval: 300 }}
     - {{ name: 故障转移, type: fallback, use: [airport], url: 'http://www.gstatic.com/generate_204', interval: 300 }}
 """
