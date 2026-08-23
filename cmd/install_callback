@@ -1,5 +1,30 @@
 #!/bin/bash
 
-### This script is called after the user installs the application.
+### 安装后初始化透明代理目录
+### - 创建 /vol1/1000/transparent-proxy/
+### - 部署 tp.sh（开关脚本）
+### - 若已有 mihomo/配置则复用，否则提示用户放置
+
+TP_DIR=/vol1/1000/transparent-proxy
+TP_SH_SRC="${TRIM_APPDEST}/tp/tp.sh"   # 应用包内置脚本
+
+mkdir -p "$TP_DIR"
+
+# 部署 tp.sh（若不存在或旧版）
+if [ ! -f "$TP_DIR/tp.sh" ] || ! grep -q "purge" "$TP_DIR/tp.sh" 2>/dev/null; then
+    if [ -f "$TP_SH_SRC" ]; then
+        cp "$TP_SH_SRC" "$TP_DIR/tp.sh"
+        chmod 755 "$TP_DIR/tp.sh"
+        echo "已部署 tp.sh"
+    fi
+fi
+
+# 检查 mihomo 是否就绪
+if [ ! -x "$TP_DIR/mihomo" ]; then
+    echo "⚠️ 未找到 mihomo 二进制，请从已有机器复制到 $TP_DIR/ 后即可使用"
+fi
+if [ ! -f "$TP_DIR/tp-config.yaml" ]; then
+    echo "⚠️ 未找到代理配置 tp-config.yaml，请从已有机器复制或在前台填写订阅链接"
+fi
 
 exit 0

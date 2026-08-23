@@ -1,36 +1,55 @@
 #!/bin/bash
 
 ### 卸载时清理透明代理，防止残留
-### - 关闭代理（删除 iptables 规则 + 恢复 DNS + 停止 mihomo）
+### fnOS 应用进程以 root 运行，无需 sudo
+### - 关闭代理（删 iptables 规则 + 恢复 DNS + 停 mihomo）
 ### - 移除 systemd 自启服务
-### - 注意：保留 /vol1/1000/transparent-proxy 目录（含用户机场节点配置），如需彻底删除请手动执行
+### - 删除 DNS 备份
+### - 删除透明代理目录（含 mihomo 二进制与节点配置）
+###   注：若用户从未部署过透明代理（目录不存在），全部静默跳过
+
+TP_DIR=/vol1/1000/transparent-proxy
+TP_SH=$TP_DIR/tp.sh
+RESOLV_BAK=/etc/resolv.conf.bak-tproxy
 
 cleanup() {
-    # 1. 关闭透明代理（幂等）
-    if [ -x /vol1/1000/transparent-proxy/tp.sh ]; then
-        echo "s1" | sudo -S /vol1/1000/transparent-proxy/tp.sh stop >/dev/null 2>&1 || true
-    fi
+    # 1. 若存在 tp.sh，调用 purge 彻底清理（关代理+删服务+删目录）
+    if [ -x "$TP_SH" ]; then
+        bash "$TP_SH" purge >/dev/null 2>&1 || true
+    else
+        # tp.sh 不存在时手动兜底清理
+        # 1a. 清理 iptables 规则
+        /usr/sbin/iptables -t nat -D OUTPUT -j TP_OUT >/dev/null 2>&1 || true
+        /usr/sbin/iptables -t nat -F TP_OUT >/dev/null 2>&1 || true
+        /usr/sbin/iptables -t nat -X TP_OUT >/dev/null 2>&1 || true
 
-    # 2. 移除 systemd 自启服务
-    if [ -f /etc/systemd/system/transparent-proxy.service ]; then
-        echo "s1" | sudo -S systemctl disable transparent-proxy.service >/dev/null 2>&1 || true
-        echo "s1" | sudo -S rm -f /etc/systemd/system/transparent-proxy.service >/dev/null 2>&1 || true
-        echo "s1" | sudo -S systemctl daemon-reload >/dev/null 2>&1 || true
-    fi
+        # 1b. 停止 mihomo（如有）
+        pkill -f "mihomo -d $TP_DIR" >/dev/null 2>&1 || true
 
-    # 3. 兜底清理 iptables 规则
-    echo "s1" | sudo -S /usr/sbin/iptables -t nat -D OUTPUT -j TP_OUT >/dev/null 2>&1 || true
-    echo "s1" | sudo -S /usr/sbin/iptables -t nat -F TP_OUT >/dev/null 2>&1 || true
-    echo "s1" | sudo -S /usr/sbin/iptables -t nat -X TP_OUT >/dev/null 2>&1 || true
-
-    # 4. 恢复 DNS（若指向了本机）
-    if grep -q "nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
-        if [ -f /etc/resolv.conf.bak-tproxy ]; then
-            echo "s1" | sudo -S cp /etc/resolv.conf.bak-tproxy /etc/resolv.conf >/dev/null 2>&1 || true
-        else
-            echo "s1" | sudo -S bash -c "echo 'nameserver 192.168.3.1' > /etc/resolv.conf" >/dev/null 2>&1 || true
+        # 1c. 恢复 DNS
+        if grep -q "nameserver 127.0.0.1" /etc/resolv.conf 2>/dev/null; then
+            if [ -f "$RESOLV_BAK" ]; then
+                cp "$RESOLV_BAK" /etc/resolv.conf >/dev/null 2>&1 || true
+            else
+                bash -c "echo 'nameserver 192.168.3.1' > /etc/resolv.conf" >/dev/null 2>&1 || true
+            fi
         fi
+
+        # 1d. 删 DNS 备份
+        rm -f "$RESOLV_BAK" >/dev/null 2>&1 || true
+
+        # 1e. 删透明代理目录
+        rm -rf "$TP_DIR" >/dev/null 2>&1 || true
     fi
+
+    # 2. 兜底移除 systemd 自启服务（tp.sh purge 已做，这里再确认）
+    if [ -f /etc/systemd/system/transparent-proxy.service ]; then
+        systemctl disable transparent-proxy.service >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/transparent-proxy.service >/dev/null 2>&1 || true
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+
+    return 0
 }
 
 cleanup
