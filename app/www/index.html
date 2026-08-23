@@ -84,6 +84,20 @@ h1 { font-size: 22px; margin-bottom: 6px; }
 .msg.info { color: #fbbf24; }
 .hint { margin-top: 22px; font-size: 12px; color: #64748b; line-height: 1.8; text-align: left; }
 .hint b { color: #94a3b8; }
+.sub-input {
+  width: 100%; padding: 10px 12px;
+  background: rgba(15, 23, 42, .6);
+  border: 1px solid rgba(148, 163, 184, .35);
+  border-radius: 8px;
+  color: #e2e8f0; font-size: 13px;
+  font-family: ui-monospace, Consolas, monospace;
+  margin-bottom: 10px;
+  outline: none;
+}
+.sub-input:focus { border-color: #38bdf8; }
+.sub-btn { flex: 1; }
+.sub-clear { background: rgba(239, 68, 68, .12); border-color: rgba(239, 68, 68, .4); color: #fca5a5; }
+.sub-hint { margin-top: 8px; font-size: 11px; color: #64748b; line-height: 1.6; text-align: left; }
 </style>
 </head>
 <body>
@@ -106,6 +120,17 @@ h1 { font-size: 22px; margin-bottom: 6px; }
       <button class="test-btn" id="testBtn" type="button">🔍 测试连接</button>
     </div>
     <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="config">
+    <h2>📡 订阅设置（可选）</h2>
+    <input class="sub-input" id="subInput" type="url" placeholder="粘贴机场订阅链接 https://..." spellcheck="false">
+    <div class="btn-row">
+      <button class="test-btn sub-btn" id="subSaveBtn" type="button">💾 保存并应用</button>
+      <button class="test-btn sub-btn sub-clear" id="subClearBtn" type="button">🗑 清除</button>
+    </div>
+    <div class="msg" id="subMsg"></div>
+    <div class="sub-hint">填写后自动拉取机场最新节点（每小时更新）；留空则使用内置静态节点。保存后代理自动重启生效。</div>
   </div>
 
   <div class="hint">
@@ -172,6 +197,55 @@ async function testConfig() {
 }
 
 document.getElementById('testBtn').addEventListener('click', testConfig);
+
+// ---- 订阅设置 ----
+const subInput = document.getElementById('subInput');
+const subMsg = document.getElementById('subMsg');
+
+function setSubMsg(text, type) {
+  subMsg.className = 'msg' + (type ? ' ' + type : '');
+  subMsg.textContent = text || '';
+}
+
+async function loadSub() {
+  try {
+    const res = await fetch(API + '/api/subscription');
+    const data = await res.json();
+    if (data.subscription) subInput.value = data.subscription;
+  } catch (e) {}
+}
+
+async function saveSub() {
+  const btn = document.getElementById('subSaveBtn');
+  btn.disabled = true;
+  setSubMsg('⏳ 正在保存并重启代理…', 'info');
+  try {
+    const res = await fetch(API + '/api/subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: subInput.value.trim() })
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (data.ok) {
+      setSubMsg('✅ ' + (data.msg || '已保存'), 'ok');
+      render(data.enabled, data.proxy);
+    } else {
+      setSubMsg('❌ ' + (data.error || '保存失败'), 'err');
+    }
+  } catch (err) {
+    setSubMsg('❌ 无法连接服务', 'err');
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('subSaveBtn').addEventListener('click', saveSub);
+document.getElementById('subClearBtn').addEventListener('click', () => {
+  subInput.value = '';
+  saveSub();
+});
+
+loadSub();
 
 document.getElementById('toggle').addEventListener('change', async (e) => {
   if (busy) { e.target.checked = !e.target.checked; return; }
