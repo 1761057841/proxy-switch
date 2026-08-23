@@ -72,6 +72,10 @@ def main():
     if not sub:
         sub = load_state_sub()
 
+    if not os.path.exists(BASE_FILE):
+        print("ERROR: 缺少 %s（配置模板），请先部署或从应用包复制" % BASE_FILE)
+        sys.exit(1)
+
     with open(BASE_FILE, "r", encoding="utf-8") as f:
         base = f.read()
 
@@ -80,6 +84,9 @@ def main():
         out = base.rstrip() + "\n\n" + block
         mode = "subscription"
     else:
+        if not os.path.exists(STATIC_FILE):
+            print("ERROR: 缺少 %s（静态节点），请填入订阅链接或部署静态节点" % STATIC_FILE)
+            sys.exit(1)
         with open(STATIC_FILE, "r", encoding="utf-8") as f:
             static = f.read()
         out = base.rstrip() + "\n\n" + static

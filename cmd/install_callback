@@ -46,6 +46,15 @@ if [ ! -f "$TP_DIR/tp.sh" ] || ! grep -q "purge" "$TP_DIR/tp.sh" 2>/dev/null; th
     fi
 fi
 
+# 部署 tp-base.yaml 模板（若不存在或旧版）
+if [ ! -f "$TP_DIR/tp-base.yaml" ] || ! grep -q "fnnas.com,DIRECT" "$TP_DIR/tp-base.yaml" 2>/dev/null; then
+    if [ -f "$APP_TP/tp-base.yaml" ]; then
+        cp "$APP_TP/tp-base.yaml" "$TP_DIR/tp-base.yaml"
+        chmod 644 "$TP_DIR/tp-base.yaml"
+        echo "已部署 tp-base.yaml 模板（含 fnnas 直连规则）"
+    fi
+fi
+
 # 部署 gen_config.py（若不存在或旧版）
 if [ ! -f "$TP_DIR/gen_config.py" ] || ! grep -q "@appdata" "$TP_DIR/gen_config.py" 2>/dev/null; then
     if [ -f "$APP_TP/gen_config.py" ]; then
