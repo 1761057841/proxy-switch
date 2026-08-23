@@ -73,6 +73,15 @@ stop_process() {
     # 清理网关 socket
     rm -f "${SOCKET_PATH}"
 
+    # 停止透明代理（mihomo/iptables/DNS 恢复）——应用停用/卸载时必须彻底清理
+    if [ -n "${TP_SCRIPT}" ] && [ -x "${TP_SCRIPT}" ]; then
+        log_msg "Stopping transparent proxy ..."
+        bash "${TP_SCRIPT}" stop >> ${LOG_FILE} 2>&1
+    elif [ -x "${TP_DIR}/tp.sh" ]; then
+        log_msg "Stopping transparent proxy ..."
+        bash "${TP_DIR}/tp.sh" stop >> ${LOG_FILE} 2>&1
+    fi
+
     return 0
 }
 
