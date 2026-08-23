@@ -60,4 +60,18 @@ if [ ! -f "$TP_DIR/tp-config.yaml" ]; then
     echo "ℹ️ 尚未生成代理配置：可在前台「订阅设置」粘贴机场订阅链接，或从已有机器复制 tp-config.yaml"
 fi
 
+# 补丁：确保 fnnas 域名直连（应用中心不转圈）
+# 若 tp-base.yaml 存在但缺 fnnas 规则，则自动插入到 cn 规则前
+if [ -f "$TP_DIR/tp-base.yaml" ] && ! grep -q "fnnas.com,DIRECT" "$TP_DIR/tp-base.yaml" 2>/dev/null; then
+    sed -i "s|    - 'DOMAIN-SUFFIX,cn,DIRECT'|    - 'DOMAIN-SUFFIX,fnnas.com,DIRECT'\n    - 'DOMAIN-SUFFIX,fnnas.net,DIRECT'\n    - 'DOMAIN-SUFFIX,cn,DIRECT'|" "$TP_DIR/tp-base.yaml" 2>/dev/null
+    echo "已修补 tp-base.yaml：fnnas 域名直连（应用中心加速）"
+    # 重新生成配置并重启（若代理在运行）
+    if [ -f "$TP_DIR/gen_config.py" ]; then
+        python3 "$TP_DIR/gen_config.py" >/dev/null 2>&1
+        if [ -f "$TP_DIR/tp.sh" ]; then
+            "$TP_DIR/tp.sh" restart >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 exit 0

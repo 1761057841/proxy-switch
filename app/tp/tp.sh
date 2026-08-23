@@ -115,6 +115,7 @@ case "${1:-}" in
     start) start ;;
     stop) stop ;;
     status) status ;;
+    restart) stop; sleep 1; start ;;
     purge) purge ;;
-    *) echo "用法: $0 start|stop|status|purge"; exit 1 ;;
+    *) echo "用法: $0 start|stop|status|restart|purge"; exit 1 ;;
 esac
