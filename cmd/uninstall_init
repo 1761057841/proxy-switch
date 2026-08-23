@@ -1,5 +1,25 @@
 #!/bin/bash
 
-### This script is called after the user uninstalls the application.
+### 卸载前清理系统代理配置，防止代理残留
+### （旧版缺陷：卸载不清理，若开启过代理会导致 /etc 残留配置仍生效）
 
+cleanup_proxy_config() {
+    # 1. /etc/environment：删除 proxy-switch 标记块（仅匹配托管标记，不误删用户配置）
+    if [ -f /etc/environment ]; then
+        sed -i '/^# BEGIN proxy-switch (managed by proxy-switch app, do not edit)$/,/^# END proxy-switch$/d' /etc/environment 2>/dev/null
+        sed -i '/^[[:space:]]*$/N;/^\n[[:space:]]*$/D' /etc/environment 2>/dev/null
+    fi
+
+    # 2. 登录 shell 代理配置
+    rm -f /etc/profile.d/proxy-switch.sh
+
+    # 3. systemd 全局环境
+    rm -f /etc/systemd/system.conf.d/10-proxy-switch.conf
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    # 4. 应用状态文件（目录可能已随卸载删除，忽略错误）
+    rm -f "${TRIM_PKGVAR}/state.json" 2>/dev/null || true
+}
+
+cleanup_proxy_config
 exit 0

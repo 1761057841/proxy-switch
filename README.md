@@ -81,6 +81,7 @@ proxy-switch/
 | POST | `/api/proxy/on` | 开启全局代理 |
 | POST | `/api/proxy/off` | 关闭全局代理 |
 | POST | `/api/config` | 保存配置 `{"proxy": "ip:port", "auth_user": "", "auth_pass": ""}` |
+| POST | `/api/test` | 测试代理连通性 `{"proxy": "ip:port", ...}`（空则用已保存配置） |
 
 ## 环境变量
 
