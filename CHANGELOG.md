@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.7.0 (2026-08-23)
+
+**新功能**
+- 集成 MetaCubeXD（mihomo 官方 Web 面板）：查看节点/测延迟/切换策略组
+- 面板内嵌应用管理页（iframe 视图），不再新开窗口
+- 后端新增 /panel/* 代理路由，无缝对接 mihomo external-controller
+
 ## v2.6.0 (2026-08-23)
 
 **新功能**
